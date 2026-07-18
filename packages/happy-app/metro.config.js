@@ -1,10 +1,15 @@
 const { getDefaultConfig } = require("expo/metro-config");
 const path = require("path");
+const fs = require("fs");
+
+const repoRoot = fs.realpathSync.native(path.resolve(__dirname, "../.."));
 
 const config = getDefaultConfig(__dirname, {
   // Enable CSS support for web
   isCSSEnabled: true,
 });
+
+config.watchFolders = [repoRoot];
 
 // Add support for .wasm files (required by Skia for all platforms)
 // Source: https://shopify.github.io/react-native-skia/docs/getting-started/installation/
