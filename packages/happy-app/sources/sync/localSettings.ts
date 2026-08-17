@@ -23,6 +23,8 @@ export const LocalSettingsSchema = z.object({
     acknowledgedCliVersions: z.record(z.string(), z.string()).describe('Acknowledged CLI versions per machine'),
     // Collapsed Rig projects in the session list - keyed by project id
     collapsedProjects: z.record(z.string(), z.boolean()).describe('Collapsed state per sidebar project'),
+    // Custom conversation pictures. Stored locally because these are image blobs.
+    sessionProfilePictures: z.record(z.string(), z.string()).describe('Custom profile picture data URLs per session'),
 });
 
 //
@@ -52,6 +54,7 @@ export const localSettingsDefaults: LocalSettings = {
     sidebarPanelActive: null,
     acknowledgedCliVersions: {},
     collapsedProjects: {},
+    sessionProfilePictures: {},
 };
 Object.freeze(localSettingsDefaults);
 

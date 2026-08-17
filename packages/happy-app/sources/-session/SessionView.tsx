@@ -20,7 +20,7 @@ import { ChatList } from '@/components/ChatList';
 import { Deferred } from '@/components/Deferred';
 import { EmptyMessages } from '@/components/EmptyMessages';
 import { SessionStatusBar } from '@/components/SessionStatusBar';
-import { Avatar } from '@/components/Avatar';
+import { SessionProfilePictureAvatar } from '@/components/SessionProfilePictureAvatar';
 import { VoiceAssistantStatusBar } from '@/components/VoiceAssistantStatusBar';
 import { useDraft } from '@/hooks/useDraft';
 import { useImagePicker } from '@/hooks/useImagePicker';
@@ -412,12 +412,14 @@ export const SessionView = React.memo((props: { id: string }) => {
                 onPress={() => router.push(`/session/${sessionId}/info`)}
                 hitSlop={10}
             >
-                <Avatar
-                    id={getSessionAvatarId(session)}
+                <SessionProfilePictureAvatar
+                    sessionId={sessionId}
+                    avatarId={getSessionAvatarId(session)}
                     size={28}
                     monochrome={!headerProps.isConnected}
                     flavor={session.metadata?.flavor}
                     clientId={session.metadata?.client?.id}
+                    editable
                 />
             </Pressable>
         )

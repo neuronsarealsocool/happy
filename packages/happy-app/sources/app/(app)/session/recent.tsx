@@ -3,7 +3,7 @@ import { Platform, View, FlatList } from 'react-native';
 import { Text } from '@/components/StyledText';
 import { useAllSessions } from '@/sync/storage';
 import { Session } from '@/sync/storageTypes';
-import { Avatar } from '@/components/Avatar';
+import { SessionProfilePictureAvatar } from '@/components/SessionProfilePictureAvatar';
 import { getSessionName, getSessionSubtitle, getSessionAvatarId } from '@/utils/sessionUtils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet } from 'react-native-unistyles';
@@ -216,7 +216,12 @@ export default function SessionHistory() {
                     style={({ pressed }) => [styles.sessionPressable, Platform.OS !== 'web' && pressed && { opacity: 0.72 }]}
                     onPress={() => navigateToSession(session.id)}
                 >
-                    <Avatar id={avatarId} size={48} />
+                    <SessionProfilePictureAvatar
+                        sessionId={session.id}
+                        avatarId={avatarId}
+                        size={48}
+                        editable
+                    />
                     <View style={styles.sessionContent}>
                         <Text style={styles.sessionTitle} numberOfLines={1}>
                             {sessionName}

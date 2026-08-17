@@ -6,7 +6,6 @@ import { SessionListViewItem, SessionRowData } from '@/sync/storage';
 import { filterProjectGroup, sessionMatchesQuery } from '@/sync/projectGroups';
 import { Ionicons } from '@expo/vector-icons';
 import { type SessionState, formatLastSeen, vibingMessages } from '@/utils/sessionUtils';
-import { Avatar } from './Avatar';
 import { ActiveSessionsGroupCompact } from './ActiveSessionsGroupCompact';
 import { ProjectGroup } from './ProjectGroup';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +23,7 @@ import { useSessionActionAlert } from '@/hooks/useSessionQuickActions';
 import { t } from '@/text';
 import { SessionShortcutHintBadge } from './ShortcutHints';
 import { ProviderIcon } from './ProviderIcon';
+import { SessionProfilePictureAvatar } from './SessionProfilePictureAvatar';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -491,7 +491,15 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
             {...menuProps}
         >
             <View style={styles.avatarContainer}>
-                <Avatar id={session.avatarId} size={48} monochrome={!status.isConnected} flavor={session.flavor} clientId={session.clientId} />
+                <SessionProfilePictureAvatar
+                    sessionId={session.id}
+                    avatarId={session.avatarId}
+                    size={48}
+                    monochrome={!status.isConnected}
+                    flavor={session.flavor}
+                    clientId={session.clientId}
+                    editable
+                />
                 {session.hasDraft && (
                     <View style={styles.draftIconContainer}>
                         <Ionicons

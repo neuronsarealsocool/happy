@@ -5,7 +5,6 @@ import { Text } from '@/components/StyledText';
 import { SessionRowData } from '@/sync/storage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { type SessionState, formatPathRelativeToHome, vibingMessages, formatLastSeen } from '@/utils/sessionUtils';
-import { Avatar } from './Avatar';
 import { Typography } from '@/constants/Typography';
 import { StatusDot } from './StatusDot';
 import { useAllMachines, useSessionGitStatus } from '@/sync/storage';
@@ -23,6 +22,7 @@ import { useRouter } from 'expo-router';
 import { SessionShortcutHintBadge } from './ShortcutHints';
 import { buildActiveSessionDisplayGroups } from '@/utils/sessionDisplayOrder';
 import { ProviderIcon } from './ProviderIcon';
+import { SessionProfilePictureAvatar } from './SessionProfilePictureAvatar';
 
 const STATUS_CONFIG: Record<SessionState, { color: string; dotColor: string; isPulsing: boolean; isConnected: boolean }> = {
     disconnected: { color: '#999', dotColor: '#999', isPulsing: false, isConnected: false },
@@ -100,7 +100,13 @@ const SectionHeader = React.memo(({ session, displayPath }: { session: SessionRo
         >
             {/* Avatar — vertically centered */}
             <View style={styles.sectionHeaderAvatar}>
-                <Avatar id={session.avatarId} size={24} flavor={null} />
+                <SessionProfilePictureAvatar
+                    sessionId={session.id}
+                    avatarId={session.avatarId}
+                    size={24}
+                    flavor={null}
+                    editable
+                />
             </View>
 
             {/* Path + branch */}

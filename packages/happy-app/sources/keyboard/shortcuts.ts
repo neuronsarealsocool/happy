@@ -23,6 +23,8 @@ export interface NavigatorPlatformLike {
 
 export type SessionActionShortcutId =
     | 'details'
+    | 'change-picture'
+    | 'clear-picture'
     | 'resume'
     | 'fork'
     | 'duplicate'
@@ -42,6 +44,8 @@ export interface ShortcutChord {
 
 export const SESSION_ACTION_SHORTCUTS: Readonly<Record<SessionActionShortcutId, ShortcutChord>> = {
     details: { key: 'o', code: 'KeyO', keyLabel: 'O', altKey: true },
+    'change-picture': { key: 'p', code: 'KeyP', keyLabel: 'P', altKey: true },
+    'clear-picture': { key: 'p', code: 'KeyP', keyLabel: 'P', altKey: true, shiftKey: true },
     resume: { key: 'r', code: 'KeyR', keyLabel: 'R', altKey: true },
     fork: { key: 'f', code: 'KeyF', keyLabel: 'F', altKey: true },
     duplicate: { key: 'd', code: 'KeyD', keyLabel: 'D', altKey: true, shiftKey: true },

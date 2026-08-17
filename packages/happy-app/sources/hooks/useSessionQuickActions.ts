@@ -14,6 +14,7 @@ import { copySessionMetadataToClipboard, copySessionMetadataAndLogsToClipboard }
 import { useSessionStatus } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
 import { getSessionForkSource } from '@/utils/sessionFork';
+import { clearSessionProfilePicture, pickAndSaveSessionProfilePicture, useSessionProfilePicture } from '@/utils/sessionProfilePictures';
 import { useRouter } from 'expo-router';
 import { useSession } from '@/sync/storage';
 import { DuplicateSheet } from '@/components/DuplicateSheet';
@@ -123,6 +124,7 @@ export function useSessionQuickActions(
     const machine = useMachine(machineId);
     const devModeEnabled = useLocalSetting('devModeEnabled');
     const expResumeSession = useSetting('expResumeSession');
+    const sessionProfilePicture = useSessionProfilePicture(session.id);
     const resumeAvailability = React.useMemo(
         () => expResumeSession ? getResumeAvailability(session, machine, sessionStatus.isConnected) : { canResume: false, canShowResume: false, subtitle: '', message: '' },
         [machine, session, sessionStatus.isConnected, expResumeSession],
@@ -151,6 +153,14 @@ export function useSessionQuickActions(
     const openDetails = React.useCallback(() => {
         router.push(`/session/${session.id}/info`);
     }, [router, session.id]);
+
+    const changeProfilePicture = React.useCallback(() => {
+        void pickAndSaveSessionProfilePicture(session.id);
+    }, [session.id]);
+
+    const clearProfilePicture = React.useCallback(() => {
+        clearSessionProfilePicture(session.id);
+    }, [session.id]);
 
     const copySessionMetadata = React.useCallback(() => {
         void (async () => {
@@ -262,7 +272,12 @@ export function useSessionQuickActions(
     const actionItems = React.useMemo<SessionActionItem[]>(() => {
         const items: SessionActionItem[] = [
             { id: 'details', icon: 'information-circle-outline', label: t('profile.details'), onPress: openDetails },
+            { id: 'change-picture', icon: 'camera-outline', label: 'Change picture', onPress: changeProfilePicture },
         ];
+
+        if (sessionProfilePicture) {
+            items.push({ id: 'clear-picture', icon: 'close-circle-outline', label: 'Remove picture', onPress: clearProfilePicture });
+        }
 
         if (resumeAvailability.canShowResume) {
             items.push({ id: 'resume', icon: 'play-circle-outline', label: t('sessionInfo.resumeSession'), onPress: resumeSession });
@@ -285,6 +300,8 @@ export function useSessionQuickActions(
         archiveSession,
         canCopySessionMetadata,
         canFork,
+        changeProfilePicture,
+        clearProfilePicture,
         copySessionMetadata,
         copySessionMetadataAndLogs,
         forkSource,
@@ -293,6 +310,7 @@ export function useSessionQuickActions(
         openDuplicateSheet,
         resumeAvailability.canShowResume,
         resumeSession,
+        sessionProfilePicture,
     ]);
 
     const showActionAlert = React.useCallback(() => {

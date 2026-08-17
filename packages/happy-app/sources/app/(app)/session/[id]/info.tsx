@@ -6,7 +6,7 @@ import { Typography } from '@/constants/Typography';
 import { Item } from '@/components/Item';
 import { ItemGroup } from '@/components/ItemGroup';
 import { ItemList } from '@/components/ItemList';
-import { Avatar } from '@/components/Avatar';
+import { SessionProfilePictureAvatar } from '@/components/SessionProfilePictureAvatar';
 import { useSession, useIsDataReady } from '@/sync/storage';
 import { getSessionName, useSessionStatus, formatOSPlatform, formatPathRelativeToHome, getSessionAvatarId, getResumeCommand } from '@/utils/sessionUtils';
 import * as Clipboard from 'expo-clipboard';
@@ -259,7 +259,15 @@ function SessionInfoContent({ session }: { session: Session }) {
                             shadowRadius: 24,
                         }}
                     >
-                        <Avatar id={getSessionAvatarId(session)} size={80} monochrome={!sessionStatus.isConnected} flavor={session.metadata?.flavor} clientId={session.metadata?.client?.id} />
+                        <SessionProfilePictureAvatar
+                            sessionId={session.id}
+                            avatarId={getSessionAvatarId(session)}
+                            size={80}
+                            monochrome={!sessionStatus.isConnected}
+                            flavor={session.metadata?.flavor}
+                            clientId={session.metadata?.client?.id}
+                            editable
+                        />
                         <Text style={{
                             fontSize: 20,
                             fontWeight: '600',
