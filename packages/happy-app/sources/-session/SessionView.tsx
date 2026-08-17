@@ -406,21 +406,24 @@ export const SessionView = React.memo((props: { id: string }) => {
                 : undefined,
         };
     }, [session, isDataReady]);
+    const headerAvatar = session ? (
+        <SessionProfilePictureAvatar
+            sessionId={sessionId}
+            avatarId={getSessionAvatarId(session)}
+            size={Platform.OS === 'web' ? 32 : 28}
+            monochrome={!headerProps.isConnected}
+            flavor={session.metadata?.flavor}
+            clientId={session.metadata?.client?.id}
+            editable
+        />
+    ) : null;
     const headerRight = session && deviceType === 'phone' && Platform.OS !== 'web'
         ? (
             <Pressable
                 onPress={() => router.push(`/session/${sessionId}/info`)}
                 hitSlop={10}
             >
-                <SessionProfilePictureAvatar
-                    sessionId={sessionId}
-                    avatarId={getSessionAvatarId(session)}
-                    size={28}
-                    monochrome={!headerProps.isConnected}
-                    flavor={session.metadata?.flavor}
-                    clientId={session.metadata?.client?.id}
-                    editable
-                />
+                {headerAvatar}
             </Pressable>
         )
         : null;
@@ -498,6 +501,7 @@ export const SessionView = React.memo((props: { id: string }) => {
                         backdropVisible={headerBackdropVisible}
                         identityLine={headerProps.identityLine}
                         extraPathSegment={fileViewPath ?? undefined}
+                        leftSlot={Platform.OS === 'web' ? headerAvatar : (deviceType === 'phone' ? null : headerAvatar)}
                         rightSlot={(diffViewOpen || !!fileViewPath) ? headerRightSlot : headerRight}
                         onTitlePress={session ? () => router.push(`/session/${sessionId}/info`) : undefined}
                         onBackPress={() => router.back()}

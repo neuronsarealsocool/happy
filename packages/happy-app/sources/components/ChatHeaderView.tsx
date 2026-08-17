@@ -28,6 +28,8 @@ interface ChatHeaderViewProps {
     identityLine?: string;
     /** Extra path segment appended to the title with a separator (used for the file-view overlay). */
     extraPathSegment?: string;
+    /** Optional content rendered before the title, usually the conversation picture. */
+    leftSlot?: React.ReactNode;
     /** Optional content rendered at the right edge of the header (used by file-view / diff overlays). */
     rightSlot?: React.ReactNode;
     onTitlePress?: () => void;
@@ -45,6 +47,7 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
     folderName,
     identityLine,
     extraPathSegment,
+    leftSlot,
     rightSlot,
     onTitlePress,
     onBackPress,
@@ -96,6 +99,7 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                                 />
                             </Pressable>
                         )}
+                        {leftSlot ? <View style={styles.webLeftSlot}>{leftSlot}</View> : null}
                         <Pressable
                             style={styles.titleContainer}
                             onPress={onTitlePress}
@@ -273,7 +277,12 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                         </>
                     ) : (
                         <View style={styles.titlePillContainer}>
-                            {nativeTitle}
+                            {leftSlot ? (
+                                <View style={styles.nativeTitleWithLeftSlot}>
+                                    <View style={styles.nativeLeftSlot}>{leftSlot}</View>
+                                    {nativeTitle}
+                                </View>
+                            ) : nativeTitle}
                         </View>
                     )}
                     {rightSlot ? (
@@ -407,6 +416,20 @@ const styles = StyleSheet.create((theme) => ({
         alignItems: 'center',
         gap: 8,
         marginLeft: 12,
+        flexShrink: 0,
+    },
+    webLeftSlot: {
+        marginRight: 10,
+        flexShrink: 0,
+    },
+    nativeTitleWithLeftSlot: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 0,
+    },
+    nativeLeftSlot: {
+        marginRight: 10,
         flexShrink: 0,
     },
     webBackButton: {

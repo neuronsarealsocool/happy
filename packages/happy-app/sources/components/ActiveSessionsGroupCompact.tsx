@@ -293,12 +293,9 @@ export const CompactSessionRow = React.memo(({ session, selected, showBorder }: 
             indicator = <StatusDot color={theme.colors.textSecondary} isPulsing={false} />;
         }
 
-        return (
-            <View style={styles.leadingIndicatorSlot}>
-                {indicator}
-            </View>
-        );
+        return indicator;
     };
+    const leadingIndicator = renderLeadingIndicator();
 
     const itemContent = (
         <Pressable
@@ -312,7 +309,22 @@ export const CompactSessionRow = React.memo(({ session, selected, showBorder }: 
         >
             <View style={styles.sessionContent}>
                 <View style={styles.sessionTitleRow}>
-                    {renderLeadingIndicator()}
+                    <View style={styles.compactAvatarContainer}>
+                        <SessionProfilePictureAvatar
+                            sessionId={session.id}
+                            avatarId={session.avatarId}
+                            size={34}
+                            monochrome={!status.isConnected}
+                            flavor={session.flavor}
+                            clientId={session.clientId}
+                            editable
+                        />
+                        {leadingIndicator ? (
+                            <View style={styles.compactAvatarStatus}>
+                                {leadingIndicator}
+                            </View>
+                        ) : null}
+                    </View>
 
                     <Text
                         style={[
@@ -482,7 +494,7 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     // Session row styles
     sessionRow: {
-        height: 56,
+        height: 64,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
@@ -498,6 +510,7 @@ const stylesheet = StyleSheet.create((theme) => ({
     sessionContent: {
         flex: 1,
         justifyContent: 'center',
+        minWidth: 0,
     },
     sessionTitleRow: {
         flexDirection: 'row',
@@ -525,7 +538,7 @@ const stylesheet = StyleSheet.create((theme) => ({
         flexShrink: 1,
     },
     sessionIdentityRow: {
-        marginLeft: 24,
+        marginLeft: 46,
         marginTop: 2,
         flexDirection: 'row',
         alignItems: 'center',
@@ -537,6 +550,26 @@ const stylesheet = StyleSheet.create((theme) => ({
         width: 16,
         height: 16,
         marginRight: 8,
+    },
+    compactAvatarContainer: {
+        position: 'relative',
+        width: 38,
+        height: 38,
+        marginRight: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+    },
+    compactAvatarStatus: {
+        position: 'absolute',
+        right: -3,
+        bottom: -3,
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: theme.colors.surface,
     },
     swipeAction: {
         width: 112,
