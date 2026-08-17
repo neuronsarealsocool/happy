@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Text, View, Pressable } from 'react-native';
+import { Text, View, Pressable, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useHeaderHeight } from '@/utils/responsive';
@@ -106,7 +106,15 @@ export const SidebarView = React.memo(() => {
     }, [hideArchivedSessions, setHideArchivedSessions]);
 
     return (
-        <View style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}>
+        <View
+            {...(Platform.OS === 'web' ? {
+                'data-happy-sidebar': true,
+                role: 'navigation',
+                'aria-label': 'Session sidebar',
+                tabIndex: 0,
+            } as any : {})}
+            style={[styles.container, { paddingTop: safeArea.top + headerHeight }]}
+        >
             <View style={styles.topControls}>
                 <Pressable
                     onPress={handleNewSession}

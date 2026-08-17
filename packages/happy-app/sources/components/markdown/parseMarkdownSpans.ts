@@ -2,6 +2,40 @@ import type { MarkdownSpan } from "./parseMarkdown";
 
 // Updated pattern to handle nested markdown and asterisks
 const pattern = /(\*\*(.*?)(?:\*\*|$))|(\*(.*?)(?:\*|$))|(\[([^\]]+)\](?:\(([^)]+)\))?)|(`(.*?)(?:`|$))/g;
+const artifactPattern = /(?:[A-Za-z]:[\\/][^\s<>"'`|]+?\.(?:html?|png|jpe?g|gif|webp|svg|pdf|md)|(?:\.{1,2}[\\/])?[A-Za-z0-9_.@()[\]\-]+(?:[\\/][A-Za-z0-9_.@()[\]\-]+)*\.(?:html?|png|jpe?g|gif|webp|svg|pdf|md))\b/gi;
+
+function pushPlainTextWithArtifactLinks(spans: MarkdownSpan[], text: string, styles: MarkdownSpan['styles']) {
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    artifactPattern.lastIndex = 0;
+
+    while ((match = artifactPattern.exec(text)) !== null) {
+        const plainText = text.slice(lastIndex, match.index);
+        if (plainText) {
+            spans.push({ styles, text: plainText, url: null });
+        }
+
+        let artifact = match[0];
+        let trailing = '';
+        while (/[),.;:!?]$/.test(artifact)) {
+            trailing = artifact.slice(-1) + trailing;
+            artifact = artifact.slice(0, -1);
+        }
+
+        if (artifact) {
+            spans.push({ styles, text: artifact, url: `artifact://${encodeURIComponent(artifact)}` });
+        }
+        if (trailing) {
+            spans.push({ styles, text: trailing, url: null });
+        }
+
+        lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < text.length) {
+        spans.push({ styles, text: text.slice(lastIndex), url: null });
+    }
+}
 
 function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, styles: MarkdownSpan['styles']) {
     const urlPattern = /https?:\/\/[^\s<]+/g;
@@ -11,7 +45,7 @@ function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, styles: Mark
     while ((match = urlPattern.exec(text)) !== null) {
         const plainText = text.slice(lastIndex, match.index);
         if (plainText) {
-            spans.push({ styles, text: plainText, url: null });
+            pushPlainTextWithArtifactLinks(spans, plainText, styles);
         }
 
         let url = match[0];
@@ -32,8 +66,25 @@ function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, styles: Mark
     }
 
     if (lastIndex < text.length) {
-        spans.push({ styles, text: text.slice(lastIndex), url: null });
+        pushPlainTextWithArtifactLinks(spans, text.slice(lastIndex), styles);
     }
+}
+
+function artifactUrlForExactText(text: string): string | null {
+    const trimmed = text.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    artifactPattern.lastIndex = 0;
+    const match = artifactPattern.exec(trimmed);
+    artifactPattern.lastIndex = 0;
+
+    if (match?.[0] === trimmed) {
+        return `artifact://${encodeURIComponent(trimmed)}`;
+    }
+
+    return null;
 }
 
 export function parseMarkdownSpans(markdown: string, header: boolean) {
@@ -73,7 +124,7 @@ export function parseMarkdownSpans(markdown: string, header: boolean) {
             }
         } else if (match[8]) {
             // Inline code
-            spans.push({ styles: ['code'], text: match[9], url: null });
+            spans.push({ styles: ['code'], text: match[9], url: artifactUrlForExactText(match[9]) });
         }
 
         lastIndex = pattern.lastIndex;

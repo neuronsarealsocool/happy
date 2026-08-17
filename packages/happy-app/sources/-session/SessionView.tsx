@@ -43,14 +43,19 @@ import { isRunningOnMac } from '@/utils/platform';
 import { useDeviceType, useHeaderHeight, useIsLandscape, useIsTablet } from '@/utils/responsive';
 import { resolveStatusBarGitBranch } from '@/utils/sessionStatusBar';
 import { FilesSidebar, SidebarMode } from '@/components/FilesSidebar';
+import { PreviewPane } from '@/components/PreviewPane';
 import { AllFilesDiffView } from '@/components/AllFilesDiffView';
 import { FileViewPanel } from '@/components/FileViewPanel';
 import { prefetchPierreDiff } from '@/components/diff/PierreDiffView';
 import { GitFileStatus } from '@/sync/gitStatusFiles';
 import { useOverlayNav } from '@/-session/sessionOverlayNav';
+import { useSessionPreviewStore } from '@/-session/sessionPreviewStore';
 import { formatPathRelativeToHome, getResumeCommandBlock, getSessionAvatarId, getSessionName, useSessionStatus } from '@/utils/sessionUtils';
+import { discoverSessionPreviewTarget, type SessionPreviewTarget } from '@/utils/sessionPreviewTargets';
 import { useSessionQuickActions } from '@/hooks/useSessionQuickActions';
 import { isVersionSupported, MINIMUM_CLI_VERSION } from '@/utils/versionUtils';
+import { useKeyboardShortcuts } from '@/components/KeyboardShortcuts/KeyboardShortcutProvider';
+import { openExternalUrl } from '@/utils/openExternalUrl';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -105,18 +110,32 @@ export const SessionView = React.memo((props: { id: string }) => {
     React.useEffect(() => {
         setHeaderBackdropVisible(false);
     }, [sessionId]);
+    const previewTarget = useSessionPreviewStore((state) => state.sessions[sessionId]?.target ?? null);
+    const rightPaneMode = useSessionPreviewStore((state) => state.sessions[sessionId]?.mode ?? 'files');
+    const rightPaneOpen = useSessionPreviewStore((state) => state.sessions[sessionId]?.isOpen ?? false);
+    const savedRightPaneWidth = useSessionPreviewStore((state) => state.sessions[sessionId]?.width ?? null);
+    const previewRefreshSignal = useSessionPreviewStore((state) => state.sessions[sessionId]?.refreshSignal ?? 0);
+    const setRightPaneMode = useSessionPreviewStore((state) => state.setMode);
+    const openRightPane = useSessionPreviewStore((state) => state.openPane);
+    const collapseRightPane = useSessionPreviewStore((state) => state.collapsePane);
+    const setRightPaneWidth = useSessionPreviewStore((state) => state.setWidth);
+    const { registerShortcutHandler } = useKeyboardShortcuts();
 
-    // Base condition: can we show the diff sidebar at all?
-    const canShowSidebar = fileDiffsSidebarEnabled
-        && (isRunningOnMac() || Platform.OS === 'web')
+    // Base condition: can we show the right-side desktop pane at all?
+    const canShowRightPane = (isRunningOnMac() || Platform.OS === 'web')
         && windowWidth >= SIDEBAR_MIN_WINDOW_WIDTH
         && (!session || (rigCanBrowseFiles(session.metadata) && rigCanUseShell(session.metadata)))
         && isDataReady && !!session;
+    const hasRightPaneContent = fileDiffsSidebarEnabled || !!previewTarget;
+    const canShowSidebar = canShowRightPane && fileDiffsSidebarEnabled;
 
-    const showSidebar = canShowSidebar && !zenMode;
+    const showRightPane = canShowRightPane && hasRightPaneContent && !zenMode;
+    const expandedRightPane = showRightPane && rightPaneOpen;
 
-    // Match left sidebar width: 30% of window, clamped to 250–360px
-    const sidebarWidth = Math.min(Math.max(Math.floor(windowWidth * 0.3), 250), 360);
+    const defaultPaneWidth = Math.min(Math.max(Math.floor(windowWidth * 0.32), RIGHT_PANE_MIN_WIDTH), 460);
+    const maxPaneWidth = Math.max(RIGHT_PANE_MIN_WIDTH, Math.min(RIGHT_PANE_MAX_WIDTH, windowWidth - 520));
+    const rightPaneWidth = clampNumber(savedRightPaneWidth ?? defaultPaneWidth, RIGHT_PANE_MIN_WIDTH, maxPaneWidth);
+    const collapsedPaneWidth = 42;
 
     // Animate diff sidebar width.
     //
@@ -126,18 +145,18 @@ export const SessionView = React.memo((props: { id: string }) => {
     // grinds to ~15fps on dev builds. Snapping skips the layout thrash —
     // the chat reflows once instead of 60 times. Native keeps the smooth
     // animation because it runs on Reanimated's UI thread.
-    const sidebarAnim = useSharedValue(showSidebar ? 1 : 0);
+    const sidebarAnim = useSharedValue(showRightPane ? 1 : 0);
     React.useEffect(() => {
-        sidebarAnim.value = withTiming(showSidebar ? 1 : 0, {
+        sidebarAnim.value = withTiming(showRightPane ? 1 : 0, {
             duration: Platform.OS === 'web' ? 0 : 250,
             easing: Easing.out(Easing.cubic),
         });
-    }, [showSidebar]);
+    }, [showRightPane]);
     const animatedSidebarStyle = useAnimatedStyle(() => ({
-        width: sidebarAnim.value * sidebarWidth,
+        width: sidebarAnim.value * (expandedRightPane ? rightPaneWidth : collapsedPaneWidth),
         opacity: sidebarAnim.value,
         overflow: 'hidden' as const,
-    }));
+    }), [collapsedPaneWidth, expandedRightPane, rightPaneWidth]);
 
     // Sidebar panels are user-managed and persisted in local settings so the
     // layout (which panels are open + which is active) survives reloads and
@@ -305,6 +324,33 @@ export const SessionView = React.memo((props: { id: string }) => {
         }
     }, [canShowSidebar]);
 
+    React.useEffect(() => {
+        if (!fileDiffsSidebarEnabled && rightPaneMode === 'files') {
+            if (previewTarget) {
+                setRightPaneMode(sessionId, 'preview');
+            } else {
+                collapseRightPane(sessionId);
+            }
+        }
+    }, [collapseRightPane, fileDiffsSidebarEnabled, previewTarget, rightPaneMode, sessionId, setRightPaneMode]);
+
+    React.useEffect(() => {
+        const unregisterFiles = registerShortcutHandler('pane.openFiles', () => {
+            if (fileDiffsSidebarEnabled) {
+                openRightPane(sessionId, 'files');
+            }
+        });
+        const unregisterOpenLatest = registerShortcutHandler('artifact.openLatest', () => {
+            if (previewTarget) {
+                openExternalUrl(externalUriForPreviewTarget(previewTarget));
+            }
+        });
+        return () => {
+            unregisterFiles();
+            unregisterOpenLatest();
+        };
+    }, [fileDiffsSidebarEnabled, openRightPane, previewTarget, registerShortcutHandler, sessionId]);
+
     // Right-side header content published by the active overlay (diff toggle / save button).
     const [headerRightSlot, setHeaderRightSlot] = React.useState<React.ReactNode>(null);
 
@@ -463,7 +509,7 @@ export const SessionView = React.memo((props: { id: string }) => {
         </>
     );
 
-    if (!canShowSidebar) {
+    if (!showRightPane) {
         return mainContent;
     }
 
@@ -523,33 +569,220 @@ export const SessionView = React.memo((props: { id: string }) => {
                     </View>
                 )}
             </View>
-            <Animated.View style={[{ minWidth: 0, alignSelf: 'stretch' }, animatedSidebarStyle]}>
-                <View style={{ width: sidebarWidth, flex: 1 }}>
-                    <FilesSidebar
-                        sessionId={sessionId}
-                        selectedPath={sidebarPanelActive === 'changes' ? scrollToFile : sidebarPanelActive === 'allFiles' ? fileViewPath : null}
-                        onFilePress={handleSidebarFilePress}
-                        openPanels={sidebarPanelsOpen}
-                        activePanel={sidebarPanelActive}
-                        onOpenPanel={openSidebarPanel}
-                        onSelectPanel={selectSidebarPanel}
-                        onClosePanel={closeSidebarPanel}
-                        onAllFilesFilePress={handleAllFilesFilePress}
-                        sideChats={sideChats}
-                        activeSideChatId={activeSideChatId}
-                        onSelectSideChat={setActiveSideChatId}
-                        onCloseSideChat={closeSideChat}
-                        onCreateSideChat={createSideChat}
-                        canCreateSideChat={!!sideChatForkSource}
-                        creatingSideChat={creatingSideChat}
+            <Animated.View style={[{ minWidth: 0, alignSelf: 'stretch', position: 'relative' }, animatedSidebarStyle]}>
+                {expandedRightPane ? (
+                    <RightPaneResizeHandle
+                        width={rightPaneWidth}
+                        minWidth={RIGHT_PANE_MIN_WIDTH}
+                        maxWidth={maxPaneWidth}
+                        onWidthChange={(width) => setRightPaneWidth(sessionId, width)}
                     />
+                ) : null}
+                <View style={{ width: expandedRightPane ? rightPaneWidth : collapsedPaneWidth, flex: 1 }}>
+                    {expandedRightPane ? (
+                        <PreviewPane
+                            sessionId={sessionId}
+                            projectPath={session.metadata?.path}
+                            target={previewTarget}
+                            mode={rightPaneMode}
+                            refreshSignal={previewRefreshSignal}
+                            filesEnabled={fileDiffsSidebarEnabled}
+                            onModeChange={(mode) => setRightPaneMode(sessionId, mode)}
+                            onCollapse={() => collapseRightPane(sessionId)}
+                        >
+                            {fileDiffsSidebarEnabled ? (
+                                <FilesSidebar
+                                    sessionId={sessionId}
+                                    selectedPath={sidebarPanelActive === 'changes' ? scrollToFile : sidebarPanelActive === 'allFiles' ? fileViewPath : null}
+                                    onFilePress={handleSidebarFilePress}
+                                    openPanels={sidebarPanelsOpen}
+                                    activePanel={sidebarPanelActive}
+                                    onOpenPanel={openSidebarPanel}
+                                    onSelectPanel={selectSidebarPanel}
+                                    onClosePanel={closeSidebarPanel}
+                                    onAllFilesFilePress={handleAllFilesFilePress}
+                                    sideChats={sideChats}
+                                    activeSideChatId={activeSideChatId}
+                                    onSelectSideChat={setActiveSideChatId}
+                                    onCloseSideChat={closeSideChat}
+                                    onCreateSideChat={createSideChat}
+                                    canCreateSideChat={!!sideChatForkSource}
+                                    creatingSideChat={creatingSideChat}
+                                />
+                            ) : null}
+                        </PreviewPane>
+                    ) : (
+                        <CollapsedRightPaneRail
+                            hasPreview={!!previewTarget}
+                            hasFiles={fileDiffsSidebarEnabled}
+                            onOpen={(mode) => openRightPane(sessionId, mode)}
+                        />
+                    )}
                 </View>
             </Animated.View>
         </View>
     );
 });
 
+function CollapsedRightPaneRail({
+    hasPreview,
+    hasFiles,
+    onOpen,
+}: {
+    hasPreview: boolean;
+    hasFiles: boolean;
+    onOpen: (mode: 'preview' | 'files') => void;
+}) {
+    const { theme } = useUnistyles();
+    const preferredMode = hasPreview ? 'preview' : 'files';
+    return (
+        <View style={{
+            flex: 1,
+            alignItems: 'center',
+            paddingTop: 10,
+            backgroundColor: theme.colors.groupped.background,
+            borderLeftWidth: 1,
+            borderLeftColor: theme.colors.divider,
+        }}>
+            <Pressable
+                accessibilityLabel={hasPreview ? 'Open preview pane' : 'Open files pane'}
+                onPress={() => onOpen(preferredMode)}
+                hitSlop={8}
+                style={({ pressed }) => ({
+                    width: 30,
+                    height: 30,
+                    borderRadius: 7,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.65 : 1,
+                    backgroundColor: theme.colors.surface,
+                })}
+            >
+                <Ionicons
+                    name={hasPreview ? 'globe-outline' : 'folder-open-outline'}
+                    size={18}
+                    color={theme.colors.textSecondary}
+                />
+            </Pressable>
+            {hasPreview && hasFiles ? (
+                <Pressable
+                    accessibilityLabel="Open files pane"
+                    onPress={() => onOpen('files')}
+                    hitSlop={8}
+                    style={({ pressed }) => ({
+                        width: 30,
+                        height: 30,
+                        borderRadius: 7,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginTop: 6,
+                        opacity: pressed ? 0.65 : 1,
+                    })}
+                >
+                    <Ionicons name="folder-open-outline" size={18} color={theme.colors.textSecondary} />
+                </Pressable>
+            ) : null}
+        </View>
+    );
+}
+
+function RightPaneResizeHandle({
+    width,
+    minWidth,
+    maxWidth,
+    onWidthChange,
+}: {
+    width: number;
+    minWidth: number;
+    maxWidth: number;
+    onWidthChange: (width: number) => void;
+}) {
+    const { theme } = useUnistyles();
+
+    const handlePointerDown = React.useCallback((event: any) => {
+        if (Platform.OS !== 'web') return;
+
+        event.preventDefault?.();
+        event.stopPropagation?.();
+
+        const startX = event.clientX;
+        const startWidth = width;
+        const previousCursor = document.body.style.cursor;
+        const previousUserSelect = document.body.style.userSelect;
+
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const handlePointerMove = (moveEvent: any) => {
+            const nextWidth = clampNumber(startWidth + startX - moveEvent.clientX, minWidth, maxWidth);
+            onWidthChange(nextWidth);
+        };
+
+        const handlePointerUp = () => {
+            document.body.style.cursor = previousCursor;
+            document.body.style.userSelect = previousUserSelect;
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+            window.removeEventListener('pointercancel', handlePointerUp);
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerUp);
+    }, [maxWidth, minWidth, onWidthChange, width]);
+
+    return (
+        <View
+            {...(Platform.OS === 'web' ? {
+                onPointerDown: handlePointerDown,
+                role: 'separator',
+                'aria-orientation': 'vertical',
+                'aria-label': 'Resize preview pane',
+                tabIndex: 0,
+            } as any : {})}
+            style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: 10,
+                zIndex: 20,
+                alignItems: 'center',
+                justifyContent: 'center',
+                ...(Platform.OS === 'web' ? { cursor: 'col-resize' as any, touchAction: 'none' as any } : {}),
+            }}
+        >
+            <View style={{
+                width: 1,
+                height: '100%',
+                backgroundColor: theme.colors.divider,
+                opacity: 0.9,
+            }} />
+        </View>
+    );
+}
+
 const SIDEBAR_MIN_WINDOW_WIDTH = 1100;
+const RIGHT_PANE_MIN_WIDTH = 280;
+const RIGHT_PANE_MAX_WIDTH = 780;
+
+function clampNumber(value: number, min: number, max: number) {
+    return Math.min(Math.max(value, min), max);
+}
+
+function externalUriForPreviewTarget(target: SessionPreviewTarget): string {
+    if (target.kind !== 'file') {
+        return target.uri;
+    }
+
+    if (target.uri.startsWith('file://')) {
+        return target.uri;
+    }
+
+    const normalized = target.uri.replaceAll('\\', '/');
+    const withLeadingSlash = /^[A-Za-z]:\//.test(normalized) ? `/${normalized}` : normalized;
+    return `file://${encodeURI(withLeadingSlash)}`;
+}
 
 // Hoisted so AgentInput's React.memo doesn't see a new array ref on every keystroke
 const AGENT_INPUT_AUTOCOMPLETE_PREFIXES = ['@', '/'];
@@ -560,6 +793,7 @@ const AGENT_INPUT_AUTOCOMPLETE_PREFIXES = ['@', '/'];
 type ChatComposerHandle = {
     getMessage: () => string;
     clearMessage: () => void;
+    focus: () => void;
 };
 
 type ChatComposerProps = Omit<
@@ -605,6 +839,9 @@ const ChatComposer = React.memo(function ChatComposer(props: ChatComposerProps) 
             inputHandleRef.current?.setTextAndSelection('', { start: 0, end: 0 });
             setMessage('');
             clearDraft();
+        },
+        focus: () => {
+            inputHandleRef.current?.focus();
         },
     }), [clearDraft]);
 
@@ -689,6 +926,8 @@ export function SessionViewLoaded({
 
     const realtimeStatus = useRealtimeStatus();
     const { messages, isLoaded } = useSessionMessages(sessionId);
+    const registerDetectedPreview = useSessionPreviewStore((state) => state.registerDetectedPreview);
+    const togglePreviewTarget = useSessionPreviewStore((state) => state.togglePreviewTarget);
     const acknowledgedCliVersions = useLocalSetting('acknowledgedCliVersions');
     const zenMode = useLocalSetting('zenMode');
     const sessionInputHorizontalPadding = Platform.OS === 'web' || isRunningOnMac() || isTablet ? 12 : 8;
@@ -700,6 +939,7 @@ export function SessionViewLoaded({
                 + (realtimeStatus !== 'disconnected' ? 32 : 0)
                 + 12
             : undefined;
+    const { registerShortcutHandler } = useKeyboardShortcuts();
 
     // Check if CLI version is outdated and not already acknowledged
     const cliVersion = session.metadata?.version;
@@ -764,6 +1004,7 @@ export function SessionViewLoaded({
     const { canResume, resumeSession, resumingSession } = useSessionQuickActions(session);
     const isDisconnected = !sessionStatus.isConnected;
     const resumeCommandBlock = getResumeCommandBlock(session);
+    const attemptedAutoResumeRef = React.useRef<string | null>(null);
 
     // Image attachment state (expImageUpload feature flag)
     const expImageUpload = useSetting('expImageUpload');
@@ -983,8 +1224,72 @@ export function SessionViewLoaded({
         };
     }, [sessionId, realtimeStatus, embedded]);
 
+    React.useEffect(() => {
+        const handle = setTimeout(() => {
+            composerHandleRef.current?.focus();
+        }, 50);
+
+        return () => clearTimeout(handle);
+    }, [sessionId]);
+
+    React.useEffect(() => {
+        registerDetectedPreview(sessionId, discoverSessionPreviewTarget(messages, { projectPath: session.metadata?.path }));
+    }, [messages, registerDetectedPreview, session.metadata?.path, sessionId]);
+
+    React.useEffect(() => {
+        const unregisterFocusPrompt = registerShortcutHandler('app.focusPrompt', () => {
+            composerHandleRef.current?.focus();
+        });
+        const unregisterPreview = registerShortcutHandler('pane.openPreview', () => {
+            const latestPreviewTarget = discoverSessionPreviewTarget(messages, { projectPath: session.metadata?.path });
+            togglePreviewTarget(sessionId, latestPreviewTarget);
+        });
+        const unregisterAttach = registerShortcutHandler('composer.attach', () => {
+            if (expImageUpload) {
+                pickImages();
+            }
+        });
+        const unregisterStop = registerShortcutHandler('session.stop', () => {
+            if ((sessionStatus.state === 'thinking' || sessionStatus.state === 'waiting') && !isDisconnected) {
+                handleAbort();
+            }
+        });
+        const unregisterCopyLatest = registerShortcutHandler('message.copyLatest', async () => {
+            const latestAgentText = [...messages]
+                .reverse()
+                .find((message) => message.kind === 'agent-text' && !message.isThinking && message.text.trim().length > 0);
+            if (latestAgentText?.kind === 'agent-text') {
+                await Clipboard.setStringAsync(latestAgentText.text);
+            }
+        });
+        return () => {
+            unregisterFocusPrompt();
+            unregisterPreview();
+            unregisterAttach();
+            unregisterStop();
+            unregisterCopyLatest();
+        };
+    }, [expImageUpload, handleAbort, isDisconnected, messages, pickImages, registerShortcutHandler, session.metadata?.path, sessionId, sessionStatus.state, togglePreviewTarget]);
+
+    React.useEffect(() => {
+        if (!canResume || resumingSession || attemptedAutoResumeRef.current === sessionId) {
+            return;
+        }
+
+        attemptedAutoResumeRef.current = sessionId;
+        resumeSession();
+    }, [canResume, resumeSession, resumingSession, sessionId]);
+
     let content = (
-        <>
+        <View
+            {...(Platform.OS === 'web' ? {
+                'data-happy-transcript': true,
+                role: 'region',
+                'aria-label': 'Message transcript',
+                tabIndex: 0,
+            } as any : {})}
+            style={{ flex: 1 }}
+        >
             <Deferred>
                 {messages.length > 0 && (
                     <ChatList
@@ -999,7 +1304,7 @@ export function SessionViewLoaded({
                     />
                 )}
             </Deferred>
-        </>
+        </View>
     );
     const placeholder = messages.length === 0 ? (
         <>

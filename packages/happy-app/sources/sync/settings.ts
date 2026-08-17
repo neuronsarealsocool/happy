@@ -1,6 +1,7 @@
 import * as z from 'zod';
 import { AgentDefaultOverridesSchema } from './agentDefaults';
 import { DEFAULT_USER_MESSAGE_BUBBLE_COLOR } from '../utils/userMessageBubbleColor';
+import type { KeyboardShortcutOverrides } from '@/utils/keyboardShortcuts';
 
 //
 // Settings Schema
@@ -13,6 +14,14 @@ export const SUPPORTED_SCHEMA_VERSION = 2;
 // around the composer.
 export const SESSION_STATUS_BAR_DISPLAY_MODES = ['hidden', 'above', 'below'] as const;
 export type SessionStatusBarDisplay = typeof SESSION_STATUS_BAR_DISPLAY_MODES[number];
+
+const KeyboardShortcutBindingSchema = z.object({
+    key: z.string(),
+    alt: z.boolean().optional(),
+    shift: z.boolean().optional(),
+    ctrl: z.boolean().optional(),
+    meta: z.boolean().optional(),
+});
 
 export const SettingsSchema = z.object({
     // Schema version for compatibility detection
@@ -29,6 +38,8 @@ export const SettingsSchema = z.object({
     experiments: z.boolean().describe('Whether to enable experimental features'),
     alwaysShowContextSize: z.boolean().describe('Always show context size in agent input'),
     agentInputEnterToSend: z.boolean().describe('Whether pressing Enter submits/sends in the agent input (web)'),
+    keyboardShortcutsEnabled: z.boolean().describe('Enable user-configurable keyboard shortcuts on web'),
+    keyboardShortcutOverrides: z.record(z.string(), z.union([KeyboardShortcutBindingSchema, z.null()])).describe('User-customized keyboard shortcuts by action id'),
     avatarStyle: z.string().describe('Avatar display style'),
     showFlavorIcons: z.boolean().describe('Whether to show AI provider icons in avatars'),
     userMessageBubbleColor: z.string().describe('User message bubble color preset'),
@@ -109,6 +120,8 @@ export const settingsDefaults: Settings = {
     experiments: false,
     alwaysShowContextSize: false,
     agentInputEnterToSend: true,
+    keyboardShortcutsEnabled: true,
+    keyboardShortcutOverrides: {} as KeyboardShortcutOverrides,
     avatarStyle: 'brutalist',
     showFlavorIcons: false,
     userMessageBubbleColor: DEFAULT_USER_MESSAGE_BUBBLE_COLOR,

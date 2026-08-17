@@ -186,6 +186,8 @@ describe('settings', () => {
                 experiments: false,
                 alwaysShowContextSize: false,
                 agentInputEnterToSend: true,
+                keyboardShortcutsEnabled: true,
+                keyboardShortcutOverrides: {},
                 avatarStyle: 'brutalist',
                 showFlavorIcons: false,
                 userMessageBubbleColor: 'gray',

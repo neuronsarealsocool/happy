@@ -62,8 +62,10 @@ export function useCommandPalette(commands: Command[], onClose: () => void) {
     }, [searchQuery]);
 
     const handleSelectCommand = useCallback((command: Command) => {
-        command.action();
         onClose();
+        setTimeout(() => {
+            void command.action();
+        }, 220);
     }, [onClose]);
 
     // Get flattened commands for keyboard navigation

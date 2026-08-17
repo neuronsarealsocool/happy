@@ -23,6 +23,7 @@ import { useTrackScreens } from '@/track/useTrackScreens';
 import { RealtimeProvider } from '@/realtime/RealtimeProvider';
 import { FaviconPermissionIndicator } from '@/components/web/FaviconPermissionIndicator';
 import { CommandPaletteProvider } from '@/components/CommandPalette/CommandPaletteProvider';
+import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts/KeyboardShortcutProvider';
 import { StatusBarProvider } from '@/components/StatusBarProvider';
 // import * as SystemUI from 'expo-system-ui';
 import { initConsoleLogging, setConsoleOutputEnabled } from '@/utils/consoleLogging';
@@ -399,13 +400,15 @@ export default function RootLayout() {
                             <StatusBarProvider />
                             <ModalProvider>
                                 <BrowserNavigationShortcuts />
-                                <CommandPaletteProvider>
-                                    <RealtimeProvider>
-                                        <HorizontalSafeAreaWrapper>
-                                            <SidebarNavigator />
-                                        </HorizontalSafeAreaWrapper>
-                                    </RealtimeProvider>
-                                </CommandPaletteProvider>
+                                <KeyboardShortcutProvider>
+                                    <CommandPaletteProvider>
+                                        <RealtimeProvider>
+                                            <HorizontalSafeAreaWrapper>
+                                                <SidebarNavigator />
+                                            </HorizontalSafeAreaWrapper>
+                                        </RealtimeProvider>
+                                    </CommandPaletteProvider>
+                                </KeyboardShortcutProvider>
                             </ModalProvider>
                         </ThemeProvider>
                     </AuthProvider>

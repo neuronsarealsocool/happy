@@ -23,6 +23,7 @@ import { applySuggestion } from './autocomplete/applySuggestion';
 import { GitStatusBadge, useHasMeaningfulGitStatus } from './GitStatusBadge';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { useSetting } from '@/sync/storage';
+import { getShortcutBindingForAction, shortcutEquals, shortcutFromReactKeyboardEvent } from '@/utils/keyboardShortcuts';
 import { hackMode, hackModes } from '@/sync/modeHacks';
 import { Theme } from '@/theme';
 import { t } from '@/text';
@@ -757,6 +758,8 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         : null;
 
     const agentInputEnterToSend = useSetting('agentInputEnterToSend');
+    const keyboardShortcutsEnabled = useSetting('keyboardShortcutsEnabled');
+    const keyboardShortcutOverrides = useSetting('keyboardShortcutOverrides');
 
 
     // Abort button state
@@ -1214,6 +1217,23 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
         // Original key handling
         if (Platform.OS === 'web') {
+            const sendShortcut = getShortcutBindingForAction('composer.send', keyboardShortcutOverrides);
+            if (
+                keyboardShortcutsEnabled
+                && sendShortcut
+                && shortcutEquals(shortcutFromReactKeyboardEvent(event), sendShortcut)
+            ) {
+                const liveText = inputRef.current?.getText() ?? '';
+                if (liveText.trim() || hasImages) {
+                    if (isSendBlocked) {
+                        handleBlockedSendAttempt();
+                    } else if (!props.isSendDisabled) {
+                        props.onSend();
+                    }
+                    return true;
+                }
+            }
+
             // On mobile web (touch devices), Enter should insert a newline since
             // there's no Shift key available. Users send via the send button instead.
             // Use pointer:coarse media query instead of ontouchstart/maxTouchPoints
@@ -1243,7 +1263,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
         }
         return false; // Key was not handled
-    }, [suggestions, moveUp, moveDown, selected, handleSuggestionSelect, props.showAbortButton, props.onAbort, isAborting, handleAbortPress, agentInputEnterToSend, props.onSend, props.onPermissionModeChange, availableModes, permissionModeKey, isSendBlocked, handleBlockedSendAttempt, props.isSendDisabled]);
+    }, [suggestions, moveUp, moveDown, selected, handleSuggestionSelect, props.showAbortButton, props.onAbort, isAborting, handleAbortPress, agentInputEnterToSend, keyboardShortcutsEnabled, keyboardShortcutOverrides, props.onSend, props.onPermissionModeChange, availableModes, permissionModeKey, isSendBlocked, handleBlockedSendAttempt, props.isSendDisabled, hasImages]);
 
     const desktopActionControls = (
         <View style={styles.actionButtonsContainer}>

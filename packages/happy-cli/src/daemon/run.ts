@@ -675,12 +675,30 @@ export async function startDaemon(): Promise<void> {
       });
     };
 
+    const isPidAlive = (pid: number): boolean => {
+      if (pid <= 0) return false;
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const findActiveTrackedSessionById = (happySessionId: string): TrackedSession | undefined => {
+      for (const session of pidToTrackedSession.values()) {
+        if (session.happySessionId === happySessionId && isPidAlive(session.pid)) return session;
+      }
+      return undefined;
+    };
+
     const findTrackedSessionById = (happySessionId: string): TrackedSession | undefined => {
       for (const session of pidToTrackedSession.values()) {
         if (session.happySessionId === happySessionId) return session;
       }
       return sessionIdToFinishedSession.get(happySessionId);
     };
+    const pendingResumeBySessionId = new Map<string, Promise<SpawnSessionResult>>();
 
     const fetchServerSessionMetadata = async (sessionId: string, encryptionKey: Uint8Array, encryptionVariant: 'legacy' | 'dataKey'): Promise<Metadata | null> => {
       try {
@@ -700,11 +718,28 @@ export async function startDaemon(): Promise<void> {
     };
 
     const resumeSession = async (happySessionId: string, options?: { model?: string; permissionMode?: string }): Promise<SpawnSessionResult> => {
+      const pendingResume = pendingResumeBySessionId.get(happySessionId);
+      if (pendingResume) {
+        logger.debug(`[DAEMON RUN] Session ${happySessionId} resume already in progress; joining existing resume`);
+        return pendingResume;
+      }
+
+      const resumePromise = (async (): Promise<SpawnSessionResult> => {
       try {
         const tracked = findTrackedSessionById(happySessionId);
         if (!tracked) {
           return { type: 'error', errorMessage: `Session ${happySessionId} is not tracked by this daemon. It may have been started before the daemon or on another machine.` };
         }
+
+        const active = findActiveTrackedSessionById(happySessionId);
+        if (active) {
+          logger.debug(`[DAEMON RUN] Session ${happySessionId} is already active in PID ${active.pid}; not spawning a duplicate resume process`);
+          return {
+            type: 'success',
+            sessionId: happySessionId,
+          };
+        }
+
         if (!tracked.happySessionMetadataFromLocalWebhook) {
           return { type: 'error', errorMessage: `Session ${happySessionId} has no metadata. Cannot resume.` };
         }
@@ -762,6 +797,16 @@ export async function startDaemon(): Promise<void> {
           type: 'error',
           errorMessage: `Failed to resume session: ${errorMessage}`,
         };
+      }
+      })();
+
+      pendingResumeBySessionId.set(happySessionId, resumePromise);
+      try {
+        return await resumePromise;
+      } finally {
+        if (pendingResumeBySessionId.get(happySessionId) === resumePromise) {
+          pendingResumeBySessionId.delete(happySessionId);
+        }
       }
     };
 

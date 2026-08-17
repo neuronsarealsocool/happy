@@ -61,4 +61,40 @@ describe('parseMarkdown', () => {
             { styles: [], text: ' for more.', url: null },
         ]);
     });
+
+    it('auto-linkifies previewable artifact paths in text blocks', () => {
+        const blocks = parseMarkdown('Created reports/demo.pdf and image.png.');
+
+        expect(blocks).toHaveLength(1);
+        expect(blocks[0]?.type).toBe('text');
+
+        if (blocks[0]?.type !== 'text') {
+            throw new Error('Expected markdown text block');
+        }
+
+        expect(blocks[0].content).toEqual([
+            { styles: [], text: 'Created ', url: null },
+            { styles: [], text: 'reports/demo.pdf', url: `artifact://${encodeURIComponent('reports/demo.pdf')}` },
+            { styles: [], text: ' and ', url: null },
+            { styles: [], text: 'image.png', url: `artifact://${encodeURIComponent('image.png')}` },
+            { styles: [], text: '.', url: null },
+        ]);
+    });
+
+    it('auto-linkifies previewable artifact paths in inline code', () => {
+        const blocks = parseMarkdown('Created `reports/demo.pdf`.');
+
+        expect(blocks).toHaveLength(1);
+        expect(blocks[0]?.type).toBe('text');
+
+        if (blocks[0]?.type !== 'text') {
+            throw new Error('Expected markdown text block');
+        }
+
+        expect(blocks[0].content).toEqual([
+            { styles: [], text: 'Created ', url: null },
+            { styles: ['code'], text: 'reports/demo.pdf', url: `artifact://${encodeURIComponent('reports/demo.pdf')}` },
+            { styles: [], text: '.', url: null },
+        ]);
+    });
 });

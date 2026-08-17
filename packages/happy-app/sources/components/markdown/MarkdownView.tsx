@@ -17,6 +17,9 @@ import { MermaidRenderer } from './MermaidRenderer';
 import { t } from '@/text';
 import { isHttpMarkdownLink } from './linkUtils';
 import { openExternalUrl } from '@/utils/openExternalUrl';
+import { useSession } from '@/sync/storage';
+import { discoverPreviewTargetInText } from '@/utils/sessionPreviewTargets';
+import { registerSessionPreview } from '@/-session/sessionPreviewStore';
 
 // Option type for callback
 export type Option = {
@@ -38,14 +41,28 @@ export const MarkdownView = React.memo((props: {
     const markdownCopyV2 = useLocalSetting('markdownCopyV2');
     const selectable = Platform.OS === 'web' || !markdownCopyV2;
     const router = useRouter();
+    const session = useSession(props.sessionId ?? '');
 
     const handleLinkPress = React.useCallback((url: string) => {
+        if (url.startsWith('artifact://')) {
+            if (!props.sessionId) return;
+            const artifactText = decodeURIComponent(url.slice('artifact://'.length));
+            const target = discoverPreviewTargetInText(artifactText, { projectPath: session?.metadata?.path });
+            if (!target) return;
+            registerSessionPreview(props.sessionId, {
+                uri: target.uri,
+                title: target.title,
+                kind: target.kind,
+            });
+            return;
+        }
+
         if (!isHttpMarkdownLink(url)) {
             return;
         }
 
         void openExternalUrl(url);
-    }, []);
+    }, [props.sessionId, session?.metadata?.path]);
 
     const handleLongPress = React.useCallback(() => {
         try {
@@ -79,7 +96,11 @@ export const MarkdownView = React.memo((props: {
                     } else if (block.type === 'table') {
                         return <RenderTableBlock headers={block.headers} rows={block.rows} onLinkPress={handleLinkPress} selectable={selectable} key={index} first={index === 0} last={index === blocks.length - 1} />;
                     } else if (block.type === 'image') {
-                        return <RenderImageBlock url={block.url} alt={block.alt} key={index} first={index === 0} last={index === blocks.length - 1} />;
+                        const imagePreviewTarget = discoverPreviewTargetInText(block.url, { projectPath: session?.metadata?.path });
+                        const imagePressUrl = imagePreviewTarget?.kind === 'file'
+                            ? `artifact://${encodeURIComponent(block.url)}`
+                            : null;
+                        return <RenderImageBlock url={block.url} alt={block.alt} key={index} first={index === 0} last={index === blocks.length - 1} onPress={imagePressUrl ? () => handleLinkPress(imagePressUrl) : undefined} />;
                     } else {
                         return null;
                     }
@@ -207,11 +228,10 @@ function RenderCodeBlock(props: { content: string, language: string | null, firs
     );
 }
 
-function RenderImageBlock(props: { url: string, alt: string, first: boolean, last: boolean }) {
+function RenderImageBlock(props: { url: string, alt: string, first: boolean, last: boolean, onPress?: () => void }) {
     const accessibleLabel = props.alt || 'Markdown image';
-
-    return (
-        <View style={[style.imageBlock, props.first && style.first, props.last && style.last]}>
+    const content = (
+        <>
             <Image
                 source={{ uri: props.url }}
                 style={style.image}
@@ -221,6 +241,21 @@ function RenderImageBlock(props: { url: string, alt: string, first: boolean, las
             {props.alt ? (
                 <Text style={style.imageCaption}>{props.alt}</Text>
             ) : null}
+        </>
+    );
+
+    return (
+        <View style={[style.imageBlock, props.first && style.first, props.last && style.last]}>
+            {props.onPress ? (
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${accessibleLabel} in preview`}
+                    onPress={props.onPress}
+                    style={({ pressed }) => [style.imagePressable, pressed && style.imagePressed]}
+                >
+                    {content}
+                </Pressable>
+            ) : content}
         </View>
     );
 }
@@ -266,14 +301,15 @@ function RenderSpans(props: RenderSpanProps) {
         {props.spans.map((span, index) => {
             if (span.url) {
                 const isExternalLink = isHttpMarkdownLink(span.url);
+                const isArtifactLink = span.url.startsWith('artifact://');
+                const isClickable = isExternalLink || isArtifactLink;
                 return (
                     <Text
                         key={index}
                         selectable={props.selectable}
-                        accessibilityRole={isExternalLink ? 'link' : undefined}
-                        style={[props.baseStyle, isExternalLink && style.link, span.styles.map(s => style[s])]}
-                        {...(isExternalLink && Platform.OS === 'web' ? { onClick: () => props.onLinkPress(span.url!) } as any : {})}
-                        onPress={isExternalLink && Platform.OS !== 'web'
+                        accessibilityRole={isClickable ? 'link' : undefined}
+                        style={[props.baseStyle, isClickable && style.link, span.styles.map(s => style[s])]}
+                        onPress={isClickable
                             ? () => props.onLinkPress(span.url!)
                             : undefined}
                     >
@@ -536,6 +572,12 @@ const style = StyleSheet.create((theme) => ({
         marginVertical: 8,
         alignSelf: 'flex-start',
         gap: 8,
+    },
+    imagePressable: {
+        cursor: 'pointer',
+    },
+    imagePressed: {
+        opacity: 0.8,
     },
     image: {
         width: '100%',

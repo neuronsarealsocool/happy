@@ -400,6 +400,12 @@ export const SettingsView = React.memo(function SettingsView({
                     onPress={() => router.push('/settings/appearance')}
                 />
                 <Item
+                    title="Accessibility"
+                    subtitle="Keyboard shortcuts and focus controls"
+                    icon={<Ionicons name="accessibility-outline" size={29} color="#007AFF" />}
+                    onPress={() => router.push('/settings/accessibility' as any)}
+                />
+                <Item
                     title={t('settings.voiceAssistant')}
                     subtitle={t('settings.voiceAssistantSubtitle')}
                     icon={<Ionicons name="mic-outline" size={29} color="#34C759" />}

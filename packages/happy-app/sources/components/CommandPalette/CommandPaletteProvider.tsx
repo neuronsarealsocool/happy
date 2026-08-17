@@ -1,23 +1,22 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Modal } from '@/modal';
 import { CommandPalette } from './CommandPalette';
 import { Command } from './types';
-import { useGlobalKeyboard } from '@/hooks/useGlobalKeyboard';
 import { useAuth } from '@/auth/AuthContext';
 import { storage, useAllMachines } from '@/sync/storage';
 import { useShallow } from 'zustand/react/shallow';
 import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { ShortcutHintsProvider } from '@/components/ShortcutHints';
-import {
-    formatShortcut,
-    getPreferredShortcutModifier,
-} from '@/keyboard/shortcuts';
+import { getPreferredShortcutModifier } from '@/keyboard/shortcuts';
 import { isTauri } from '@/utils/isTauri';
 import { useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
 import { getSessionShortcutIdsInDisplayOrder } from '@/utils/sessionDisplayOrder';
 import { t } from '@/text';
+import { useGlobalKeyboard } from '@/hooks/useGlobalKeyboard';
+import { getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
+import { useKeyboardShortcuts } from '@/components/KeyboardShortcuts/KeyboardShortcutProvider';
 
 const EMPTY_SESSION_IDS: readonly string[] = [];
 
@@ -25,6 +24,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     const router = useRouter();
     const { logout, isAuthenticated } = useAuth();
     const sessions = storage(useShallow((state) => state.sessions));
+    const isDataReady = storage(useShallow((state) => state.isDataReady));
     const commandPaletteEnabled = storage(useShallow((state) => state.localSettings.commandPaletteEnabled));
     const sessionListViewData = useVisibleSessionListViewData();
     const machines = useAllMachines();
@@ -38,18 +38,36 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         machines,
         t('status.unknown'),
     ), [machines, sessionListViewData]);
+    const openedOnStartup = useRef(false);
+    const { registerShortcutHandler, getShortcutLabel } = useKeyboardShortcuts();
 
-    // Define available commands
     const commands = useMemo((): Command[] => {
-        const cmds: Command[] = [
-            // Navigation commands
+        const cmds: Command[] = [];
+
+        const availableSessions = Object.values(sessions)
+            .sort((a, b) => b.updatedAt - a.updatedAt);
+
+        availableSessions.forEach(session => {
+            cmds.push({
+                id: `session-${session.id}`,
+                title: getSessionName(session),
+                subtitle: getSessionSubtitle(session),
+                icon: 'chatbubble-outline',
+                category: 'Available Sessions',
+                action: () => {
+                    navigateToSession(session.id);
+                }
+            });
+        });
+
+        cmds.push(
             {
                 id: 'new-session',
                 title: 'New Session',
                 subtitle: 'Start a new chat session',
                 icon: 'add-circle-outline',
                 category: 'Sessions',
-                shortcut: formatShortcut(preferredModifier, 'N', browserSafeShortcuts),
+                shortcut: getShortcutLabel('app.newSession'),
                 action: () => {
                     router.navigate('/new');
                 }
@@ -70,9 +88,20 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
                 subtitle: 'Configure your preferences',
                 icon: 'settings-outline',
                 category: 'Navigation',
-                shortcut: formatShortcut(preferredModifier, ',', browserSafeShortcuts),
+                shortcut: getShortcutLabel('app.openSettings'),
                 action: () => {
                     router.push('/settings');
+                }
+            },
+            {
+                id: 'accessibility-settings',
+                title: 'Accessibility Settings',
+                subtitle: 'Configure keyboard shortcuts',
+                icon: 'accessibility-outline',
+                category: 'Navigation',
+                shortcut: getShortcutLabel('app.showShortcuts'),
+                action: () => {
+                    router.push('/settings/accessibility');
                 }
             },
             {
@@ -95,28 +124,8 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
                     router.push('/terminal/connect');
                 }
             },
-        ];
+        );
 
-        // Add session-specific commands
-        const recentSessions = Object.values(sessions)
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-            .slice(0, 5);
-
-        recentSessions.forEach(session => {
-            const sessionName = session.metadata?.name || `Session ${session.id.slice(0, 6)}`;
-            cmds.push({
-                id: `session-${session.id}`,
-                title: sessionName,
-                subtitle: session.metadata?.path || 'Switch to session',
-                icon: 'time-outline',
-                category: 'Recent Sessions',
-                action: () => {
-                    navigateToSession(session.id);
-                }
-            });
-        });
-
-        // System commands
         cmds.push({
             id: 'sign-out',
             title: 'Sign Out',
@@ -128,7 +137,6 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
             }
         });
 
-        // Dev commands (if in development)
         if (__DEV__) {
             cmds.push({
                 id: 'dev-menu',
@@ -143,11 +151,11 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         }
 
         return cmds;
-    }, [browserSafeShortcuts, router, logout, sessions, navigateToSession, preferredModifier]);
+    }, [getShortcutLabel, router, logout, navigateToSession, sessions]);
 
-    const showCommandPalette = useCallback(() => {
-        if (Platform.OS !== 'web' || !isAuthenticated || !commandPaletteEnabled) return;
-        
+    const showCommandPalette = useCallback((options?: { ignoreEnabled?: boolean }) => {
+        if (Platform.OS !== 'web' || !isAuthenticated || (!commandPaletteEnabled && !options?.ignoreEnabled)) return;
+
         Modal.show({
             component: CommandPalette,
             props: {
@@ -175,13 +183,27 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
 
     const visibleModifier = useGlobalKeyboard(
         {
-            commandPalette: isAuthenticated && commandPaletteEnabled ? showCommandPalette : undefined,
+            commandPalette: isAuthenticated && commandPaletteEnabled ? () => showCommandPalette() : undefined,
             newSession: isAuthenticated ? openNewSession : undefined,
             settings: isAuthenticated ? openSettings : undefined,
             recentSession: isAuthenticated ? openRecentSession : undefined,
         },
         browserSafeShortcuts,
     );
+
+    useEffect(() => registerShortcutHandler('app.openCommandPalette', () => {
+        showCommandPalette({ ignoreEnabled: true });
+    }), [registerShortcutHandler, showCommandPalette]);
+
+    useEffect(() => {
+        if (openedOnStartup.current || !isAuthenticated || !isDataReady || Platform.OS !== 'web') {
+            return;
+        }
+
+        openedOnStartup.current = true;
+        const handle = setTimeout(() => showCommandPalette({ ignoreEnabled: true }), 0);
+        return () => clearTimeout(handle);
+    }, [isAuthenticated, isDataReady, showCommandPalette]);
 
     return (
         <ShortcutHintsProvider

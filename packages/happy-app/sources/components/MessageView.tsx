@@ -1,7 +1,8 @@
 import * as React from "react";
-import { View, Text, Platform } from "react-native";
+import { View, Text, Platform, Pressable } from "react-native";
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { MarkdownView } from "./markdown/MarkdownView";
 import { t } from '@/text';
 import { Message, UserTextMessage, AgentTextMessage, ToolCallMessage } from "@/sync/typesMessage";
@@ -14,7 +15,71 @@ import { Option } from './markdown/MarkdownView';
 import { layout } from "./layout";
 import { parseLocalCommandMessage, isUserSlashCommandEcho } from './parseLocalCommandMessage';
 import { resolveUserMessageBubbleColor } from '@/utils/userMessageBubbleColor';
+import { discoverPreviewTargetsInText, type SessionPreviewTargetKind } from '@/utils/sessionPreviewTargets';
+import { registerSessionPreview } from '@/-session/sessionPreviewStore';
 
+function CopyHoverFrame(props: {
+  text: string;
+  align: 'left' | 'right';
+  children: React.ReactNode;
+}) {
+  const { theme } = useUnistyles();
+  const [isHovered, setIsHovered] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const copiedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showCopyButton = Platform.OS === 'web' && isHovered && props.text.trim().length > 0;
+
+  React.useEffect(() => () => {
+    if (copiedTimeoutRef.current) {
+      clearTimeout(copiedTimeoutRef.current);
+    }
+  }, []);
+
+  const handleCopy = React.useCallback(async () => {
+    const text = props.text.trim();
+    if (!text) return;
+    await Clipboard.setStringAsync(text);
+    setCopied(true);
+    if (copiedTimeoutRef.current) {
+      clearTimeout(copiedTimeoutRef.current);
+    }
+    copiedTimeoutRef.current = setTimeout(() => setCopied(false), 1200);
+  }, [props.text]);
+
+  const webHoverProps = Platform.OS === 'web'
+    ? {
+      onMouseEnter: () => setIsHovered(true),
+      onMouseLeave: () => setIsHovered(false),
+    }
+    : {};
+
+  return (
+    <View
+      {...webHoverProps}
+      style={styles.copyFrame}
+    >
+      {props.children}
+      {showCopyButton ? (
+        <Pressable
+          accessibilityLabel={copied ? t('common.copied') : 'Copy message'}
+          onPress={handleCopy}
+          hitSlop={8}
+          style={[
+            styles.copyButton,
+            props.align === 'right' ? styles.copyButtonRight : styles.copyButtonLeft,
+            { backgroundColor: theme.colors.surfaceHigh, borderColor: theme.colors.divider },
+          ]}
+        >
+          <Ionicons
+            name={copied ? 'checkmark' : 'copy-outline'}
+            size={15}
+            color={copied ? theme.colors.success : theme.colors.textSecondary}
+          />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 export const MessageView = React.memo((props: {
   message: Message;
@@ -57,7 +122,7 @@ function RenderBlock(props: {
       );
 
     case 'agent-text':
-      return <AgentTextBlock message={props.message} sessionId={props.sessionId} />;
+      return <AgentTextBlock message={props.message} metadata={props.metadata} sessionId={props.sessionId} />;
 
     case 'tool-call':
       return <ToolCallBlock
@@ -121,9 +186,11 @@ function UserTextBlock(props: {
   if (parsed.kind === 'goal-run') {
     return (
       <View style={styles.userMessageContainer}>
-        <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle, styles.goalMessageBubble]}>
-          <MarkdownView markdown={parsed.goal} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
-        </View>
+        <CopyHoverFrame text={props.message.displayText || props.message.text} align="right">
+          <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle, styles.goalMessageBubble]}>
+            <MarkdownView markdown={parsed.goal} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+          </View>
+        </CopyHoverFrame>
         <View style={styles.goalSentRow}>
           <Ionicons name="locate-outline" size={16} color={styles.goalSentText.color} />
           <Text style={styles.goalSentText}>{t('message.sentAsGoal')}</Text>
@@ -135,9 +202,11 @@ function UserTextBlock(props: {
     return (
       <View style={styles.userMessageContainer}>
         {parsed.args ? (
-          <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle, styles.commandMessageBubble]}>
-            <MarkdownView markdown={parsed.args} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
-          </View>
+          <CopyHoverFrame text={props.message.displayText || props.message.text} align="right">
+            <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle, styles.commandMessageBubble]}>
+              <MarkdownView markdown={parsed.args} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+            </View>
+          </CopyHoverFrame>
         ) : null}
         <View style={[styles.commandChip, styles.userMessageBubbleSolid, bubbleStyle]}>
           <Text style={styles.commandChipText}>/{parsed.commandName}</Text>
@@ -150,15 +219,18 @@ function UserTextBlock(props: {
     <View style={styles.userMessageContainer}>
       {/* Text owns long-press so native selection / Markdown Copy v2 can work
           without also opening the rewind picker. Rewind remains in session actions. */}
-      <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle]}>
-        <MarkdownView markdown={parsed.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
-      </View>
+      <CopyHoverFrame text={props.message.displayText || props.message.text} align="right">
+        <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle]}>
+          <MarkdownView markdown={parsed.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+        </View>
+      </CopyHoverFrame>
     </View>
   );
 }
 
 function AgentTextBlock(props: {
   message: AgentTextMessage;
+  metadata: Metadata | null;
   sessionId: string;
 }) {
   const handleOptionPress = React.useCallback((option: Option) => {
@@ -172,9 +244,72 @@ function AgentTextBlock(props: {
 
   return (
     <View style={styles.agentMessageContainer}>
-      <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+      <CopyHoverFrame text={props.message.text} align="left">
+        <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+      </CopyHoverFrame>
+      <ArtifactActionRow
+        text={props.message.text}
+        projectPath={props.metadata?.path}
+        sessionId={props.sessionId}
+      />
     </View>
   );
+}
+
+function ArtifactActionRow(props: {
+  text: string;
+  projectPath?: string | null;
+  sessionId: string;
+}) {
+  const { theme } = useUnistyles();
+  const targets = React.useMemo(
+    () => discoverPreviewTargetsInText(props.text, { projectPath: props.projectPath }, 4),
+    [props.projectPath, props.text],
+  );
+
+  if (targets.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.artifactRow}>
+      {targets.map((target) => (
+        <Pressable
+          key={`${target.kind}:${target.uri}`}
+          accessibilityRole="button"
+          accessibilityLabel={`Preview ${target.title}`}
+          onPress={() => registerSessionPreview(props.sessionId, {
+            uri: target.uri,
+            title: target.title,
+            kind: target.kind as SessionPreviewTargetKind,
+          })}
+          style={({ pressed }) => [
+            styles.artifactButton,
+            { borderColor: theme.colors.divider, backgroundColor: theme.colors.surfaceHigh },
+            pressed && styles.artifactButtonPressed,
+          ]}
+        >
+          <Ionicons
+            name={artifactIconName(target.kind, target.title)}
+            size={15}
+            color={theme.colors.textSecondary}
+          />
+          <Text style={styles.artifactButtonText} numberOfLines={1}>
+            {target.title}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function artifactIconName(kind: SessionPreviewTargetKind, title: string): React.ComponentProps<typeof Ionicons>['name'] {
+  if (kind === 'url') return 'globe-outline';
+  const lower = title.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'document-text-outline';
+  if (/\.(png|jpe?g|gif|webp|svg)$/.test(lower)) return 'image-outline';
+  if (/\.(html?|md)$/.test(lower)) return 'document-outline';
+  return 'attach-outline';
 }
 
 function AgentEventBlock(props: {
@@ -255,6 +390,31 @@ const styles = StyleSheet.create((theme) => ({
     maxWidth: layout.maxWidth,
     overflow: 'hidden',
   },
+  copyFrame: {
+    position: 'relative',
+    maxWidth: '100%',
+  },
+  copyButton: {
+    position: 'absolute',
+    top: -10,
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+    shadowColor: theme.colors.shadow.color,
+    shadowOpacity: theme.colors.shadow.opacity,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  copyButtonLeft: {
+    left: 0,
+  },
+  copyButtonRight: {
+    right: 0,
+  },
   userMessageContainer: {
     maxWidth: '100%',
     flexDirection: 'column',
@@ -314,6 +474,33 @@ const styles = StyleSheet.create((theme) => ({
     marginBottom: 16,
     borderRadius: 16,
     maxWidth: '100%',
+  },
+  artifactRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 2,
+  },
+  artifactButton: {
+    minWidth: 0,
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    cursor: 'pointer',
+  },
+  artifactButtonPressed: {
+    opacity: 0.72,
+  },
+  artifactButtonText: {
+    color: theme.colors.text,
+    fontSize: 13,
+    lineHeight: 18,
+    maxWidth: 280,
   },
   agentEventContainer: {
     marginHorizontal: 8,
