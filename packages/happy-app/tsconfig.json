@@ -6,12 +6,18 @@
       "@/*": [
         "./sources/*"
       ],
+      "@slopus/happy-wire": [
+        "../happy-wire"
+      ],
       "hello-world": [ "../../hello-world" ]
     },
     "jsx": "react-jsx",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
+    "types": [
+      "react"
+    ],
     "forceConsistentCasingInFileNames": true,
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],

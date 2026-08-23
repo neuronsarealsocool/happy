@@ -22,6 +22,9 @@
     "inlineSources": true,
     "strictPropertyInitialization": true,
     "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
     "resolveJsonModule": true,
     "noEmit": true,
     "paths": {
