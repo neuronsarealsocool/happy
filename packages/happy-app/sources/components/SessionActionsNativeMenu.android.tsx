@@ -22,9 +22,12 @@ export function SessionActionsNativeMenu({
         canArchive,
         canCopySessionMetadata,
         canShowResume,
+        changeProfilePicture,
+        clearProfilePicture,
         copySessionMetadata,
         openDetails,
         resumeSession,
+        sessionProfilePicture,
     } = useSessionQuickActions(session, {
         onAfterArchive,
         onAfterDelete,
@@ -36,6 +39,14 @@ export function SessionActionsNativeMenu({
                 <DropdownMenuItem onClick={openDetails}>
                     <DropdownMenuItem.Text>Details</DropdownMenuItem.Text>
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={changeProfilePicture}>
+                    <DropdownMenuItem.Text>Change picture</DropdownMenuItem.Text>
+                </DropdownMenuItem>
+                {sessionProfilePicture && (
+                    <DropdownMenuItem onClick={clearProfilePicture}>
+                        <DropdownMenuItem.Text>Remove picture</DropdownMenuItem.Text>
+                    </DropdownMenuItem>
+                )}
                 {canArchive && (
                     <DropdownMenuItem onClick={archiveSession}>
                         <DropdownMenuItem.Text>Archive</DropdownMenuItem.Text>

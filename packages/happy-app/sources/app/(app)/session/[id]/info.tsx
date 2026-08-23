@@ -133,12 +133,15 @@ function SessionInfoContent({ session }: { session: Session }) {
     const sessionStatus = useSessionStatus(session);
     const {
         canShowResume,
+        changeProfilePicture,
+        clearProfilePicture,
         canFork,
         forking,
         forkSession,
         openDuplicateSheet,
         resumeSession,
         resumeSessionSubtitle,
+        sessionProfilePicture,
     } = useSessionQuickActions(session);
 
     // Check if CLI version is outdated
@@ -291,6 +294,23 @@ function SessionInfoContent({ session }: { session: Session }) {
                         </View>
                     </MobileGlassSurface>
                 </View>
+
+                <ItemGroup>
+                    <Item
+                        title="Change conversation picture"
+                        subtitle="Choose a photo for this chat"
+                        icon={<Ionicons name="camera-outline" size={29} color="#007AFF" />}
+                        onPress={changeProfilePicture}
+                    />
+                    {sessionProfilePicture && (
+                        <Item
+                            title="Remove conversation picture"
+                            subtitle="Use the default generated avatar"
+                            icon={<Ionicons name="close-circle-outline" size={29} color="#FF3B30" />}
+                            onPress={clearProfilePicture}
+                        />
+                    )}
+                </ItemGroup>
 
                 {/* CLI Version Warning */}
                 {isCliOutdated && (

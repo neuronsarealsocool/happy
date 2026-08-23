@@ -87,6 +87,25 @@ export function SessionProfilePictureAvatar({
                     <Ionicons name="camera-outline" size={Math.max(14, Math.round(size * 0.38))} color="#FFFFFF" />
                 </View>
             )}
+            <View
+                pointerEvents="none"
+                style={[
+                    styles.cameraBadge,
+                    {
+                        width: Math.max(18, Math.round(size * 0.36)),
+                        height: Math.max(18, Math.round(size * 0.36)),
+                        borderRadius: Math.max(9, Math.round(size * 0.18)),
+                        backgroundColor: theme.colors.surface,
+                        borderColor: theme.colors.surfaceHigh,
+                    },
+                ]}
+            >
+                <Ionicons
+                    name="camera"
+                    size={Math.max(11, Math.round(size * 0.2))}
+                    color={theme.colors.text}
+                />
+            </View>
         </Pressable>
     );
 }
@@ -101,5 +120,13 @@ const stylesheet = StyleSheet.create(() => ({
         ...StyleSheet.absoluteFillObject,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    cameraBadge: {
+        position: 'absolute',
+        right: -1,
+        bottom: -1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
     },
 }));

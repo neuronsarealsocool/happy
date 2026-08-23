@@ -419,12 +419,7 @@ export const SessionView = React.memo((props: { id: string }) => {
     ) : null;
     const headerRight = session && deviceType === 'phone' && Platform.OS !== 'web'
         ? (
-            <Pressable
-                onPress={() => router.push(`/session/${sessionId}/info`)}
-                hitSlop={10}
-            >
-                {headerAvatar}
-            </Pressable>
+            headerAvatar
         )
         : null;
 

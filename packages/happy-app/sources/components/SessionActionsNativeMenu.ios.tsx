@@ -25,9 +25,12 @@ export function SessionActionsNativeMenu({
         canArchive,
         canCopySessionMetadata,
         canShowResume,
+        changeProfilePicture,
+        clearProfilePicture,
         copySessionMetadata,
         openDetails,
         resumeSession,
+        sessionProfilePicture,
     } = useSessionQuickActions(session, {
         onAfterArchive,
         onAfterDelete,
@@ -38,6 +41,10 @@ export function SessionActionsNativeMenu({
             <ContextMenu>
                 <ContextMenu.Items>
                     <Button onPress={openDetails} systemImage={iosSymbol('info.circle')} label="Details" />
+                    <Button onPress={changeProfilePicture} systemImage={iosSymbol('camera')} label="Change picture" />
+                    {sessionProfilePicture && (
+                        <Button onPress={clearProfilePicture} systemImage={iosSymbol('xmark.circle')} label="Remove picture" />
+                    )}
                     {canArchive && (
                         <Button onPress={archiveSession} systemImage={iosSymbol('archivebox')} label="Archive" />
                     )}

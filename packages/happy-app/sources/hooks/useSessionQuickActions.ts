@@ -333,6 +333,8 @@ export function useSessionQuickActions(
         canResume: resumeAvailability.canResume,
         canShowResume: resumeAvailability.canShowResume,
         canFork,
+        changeProfilePicture,
+        clearProfilePicture,
         copySessionMetadata,
         copySessionMetadataAndLogs,
         forkSession,
@@ -342,6 +344,7 @@ export function useSessionQuickActions(
         resumeSession,
         resumeSessionSubtitle: resumeAvailability.subtitle,
         resumingSession,
+        sessionProfilePicture,
     };
 }
 
