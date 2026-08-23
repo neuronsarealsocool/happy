@@ -20,6 +20,7 @@ config.resolver.assetExts.push('wasm');
 // `tauri dev`, which crashes Metro's fallback watcher on Windows with ENOENT.
 config.resolver.blockList = [
   /[/\\]src-tauri[/\\]target[/\\].*/,
+  /[/\\]node_modules[/\\].*[/\\]android[/\\]\.cxx[/\\].*/,
 ];
 
 // Force every preact / preact/hooks import (ESM or CJS, from any package) to

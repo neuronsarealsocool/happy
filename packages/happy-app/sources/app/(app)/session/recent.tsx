@@ -13,6 +13,8 @@ import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { Pressable } from 'react-native';
 import { t } from '@/text';
 import { MobileGlassSurface } from '@/components/MobileGlass';
+import { Ionicons } from '@expo/vector-icons';
+import { pickAndSaveSessionProfilePicture } from '@/utils/sessionProfilePictures';
 
 interface SessionHistoryItem {
     type: 'session' | 'date-header';
@@ -76,6 +78,7 @@ const styles = StyleSheet.create((theme) => ({
     sessionContent: {
         flex: 1,
         marginLeft: 16,
+        paddingRight: Platform.select({ web: 0, default: 48 }),
     },
     sessionTitle: {
         fontSize: 15,
@@ -100,6 +103,22 @@ const styles = StyleSheet.create((theme) => ({
         color: theme.colors.textSecondary,
         textAlign: 'center',
         ...Typography.default(),
+    },
+    pictureButton: {
+        position: 'absolute',
+        right: 12,
+        top: 20,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: theme.colors.surfaceHigh,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.divider,
+    },
+    pictureButtonIcon: {
+        color: theme.colors.text,
     },
 }));
 
@@ -200,6 +219,11 @@ export default function SessionHistory() {
             const isFirst = prevItem?.type === 'date-header';
             const isLast = nextItem?.type === 'date-header' || nextItem == null;
             const isSingle = isFirst && isLast;
+            const handleChangePicture = (event?: any) => {
+                event?.preventDefault?.();
+                event?.stopPropagation?.();
+                void pickAndSaveSessionProfilePicture(session.id);
+            };
             
             return (
                 <MobileGlassSurface
@@ -231,6 +255,20 @@ export default function SessionHistory() {
                         </Text>
                     </View>
                 </Pressable>
+                {Platform.OS !== 'web' && (
+                    <Pressable
+                        accessibilityLabel={`Change picture for ${sessionName}`}
+                        accessibilityRole="button"
+                        hitSlop={8}
+                        onPress={handleChangePicture}
+                        style={({ pressed }) => [
+                            styles.pictureButton,
+                            pressed && { opacity: 0.72 },
+                        ]}
+                    >
+                        <Ionicons name="camera" size={20} style={styles.pictureButtonIcon} />
+                    </Pressable>
+                )}
                 </MobileGlassSurface>
             );
         }

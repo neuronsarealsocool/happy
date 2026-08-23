@@ -24,6 +24,7 @@ import { t } from '@/text';
 import { SessionShortcutHintBadge } from './ShortcutHints';
 import { ProviderIcon } from './ProviderIcon';
 import { SessionProfilePictureAvatar } from './SessionProfilePictureAvatar';
+import { pickAndSaveSessionProfilePicture } from '@/utils/sessionProfilePictures';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -112,6 +113,7 @@ const stylesheet = StyleSheet.create((theme) => ({
     sessionContent: {
         flex: 1,
         marginLeft: 16,
+        paddingRight: Platform.select({ web: 0, default: 48 }),
         justifyContent: 'center',
     },
     sessionTitleRow: {
@@ -185,6 +187,22 @@ const stylesheet = StyleSheet.create((theme) => ({
         paddingHorizontal: 16,
         paddingBottom: 12,
         backgroundColor: Platform.select({ web: theme.colors.groupped.background, default: 'transparent' }),
+    },
+    pictureButton: {
+        position: 'absolute',
+        right: 12,
+        top: 20,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: theme.colors.surfaceHigh,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.divider,
+    },
+    pictureButtonIcon: {
+        color: theme.colors.text,
     },
 }));
 
@@ -455,6 +473,12 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
         navigateToSession(session.id);
     }, [navigateToSession, session.id]);
 
+    const handleChangePicture = React.useCallback((event?: any) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        void pickAndSaveSessionProfilePicture(session.id);
+    }, [session.id]);
+
     const handleContextMenu = React.useCallback((event: any) => {
         event.preventDefault?.();
         event.stopPropagation?.();
@@ -556,6 +580,20 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                 </View>
             </View>
         </Pressable>
+        {Platform.OS !== 'web' && (
+            <Pressable
+                accessibilityLabel={`Change picture for ${session.name}`}
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={handleChangePicture}
+                style={({ pressed }) => [
+                    styles.pictureButton,
+                    pressed && { opacity: 0.72 },
+                ]}
+            >
+                <Ionicons name="camera" size={20} style={styles.pictureButtonIcon} />
+            </Pressable>
+        )}
         {Platform.OS === 'web' && (
             <SessionActionsPopover
                 anchor={actionsAnchor}
