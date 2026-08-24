@@ -1,6 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat, type Action } from 'expo-image-manipulator';
-import { Platform } from 'react-native';
 import { Modal } from '@/modal';
 import { storage, useLocalSetting } from '@/sync/storage';
 
@@ -34,14 +33,6 @@ export function clearSessionProfilePicture(sessionId: string) {
 
 export async function pickAndSaveSessionProfilePicture(sessionId: string): Promise<boolean> {
     try {
-        if (Platform.OS !== 'web') {
-            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (permission.status !== 'granted') {
-                Modal.alert('Permission needed', 'Happy needs photo library access to choose a conversation picture.');
-                return false;
-            }
-        }
-
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsMultipleSelection: false,
