@@ -190,7 +190,7 @@ describe('settings', () => {
                 keyboardShortcutOverrides: {},
                 avatarStyle: 'brutalist',
                 showFlavorIcons: false,
-                userMessageBubbleColor: 'gray',
+                userMessageBubbleColor: 'blue',
                 sessionStatusBarDisplay: 'hidden',
                 usageLimitShowRemaining: false,
                 hideInactiveSessions: false,

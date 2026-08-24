@@ -14,13 +14,12 @@ export type UserMessageBubbleGlassPalette = {
     tint: string;
 };
 
-// gray matches the pre-picker bubble (theme userMessageBackground #2C2C2E dark)
-export const DEFAULT_USER_MESSAGE_BUBBLE_COLOR: UserMessageBubbleColor = 'gray';
+export const DEFAULT_USER_MESSAGE_BUBBLE_COLOR: UserMessageBubbleColor = 'blue';
 
 const lightPalettes: Record<UserMessageBubbleColor, UserMessageBubblePalette> = {
     blue: {
-        background: '#E8F2FF',
-        border: '#9CC9FF',
+        background: '#0084FF',
+        border: '#0084FF',
         indicator: '#0A84FF',
     },
     green: {
@@ -43,18 +42,17 @@ const lightPalettes: Record<UserMessageBubbleColor, UserMessageBubblePalette> = 
         border: '#D9C292',
         indicator: '#B28B3D',
     },
-    // Exactly the pre-picker bubble: theme.colors.userMessageBackground (light)
     gray: {
-        background: '#f0eee6',
-        border: '#f0eee6',
+        background: '#F0F2F5',
+        border: '#F0F2F5',
         indicator: '#8E8E93',
     },
 };
 
 const darkPalettes: Record<UserMessageBubbleColor, UserMessageBubblePalette> = {
     blue: {
-        background: '#17324D',
-        border: '#2F6EA8',
+        background: '#0084FF',
+        border: '#0084FF',
         indicator: '#64B5FF',
     },
     green: {
@@ -77,10 +75,9 @@ const darkPalettes: Record<UserMessageBubbleColor, UserMessageBubblePalette> = {
         border: '#8D7A55',
         indicator: '#E8C878',
     },
-    // Exactly the pre-picker bubble: theme.colors.userMessageBackground (dark)
     gray: {
-        background: '#2C2C2E',
-        border: '#2C2C2E',
+        background: '#303134',
+        border: '#303134',
         indicator: '#8E8E93',
     },
 };

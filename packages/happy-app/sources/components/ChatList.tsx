@@ -417,7 +417,7 @@ const ChatListInternal = React.memo((props: {
     }, []);
 
     return (
-        <View style={{ flex: 1 }}>
+        <View style={styles.chatSurface}>
             <FlatList
                 key={`${props.sessionId}:${handoffListRevision}`}
                 ref={flatListRef}
@@ -480,7 +480,7 @@ const ChatListInternal = React.memo((props: {
                         ]}
                         onPress={scrollToBottom}
                     >
-                        <Octicons name="arrow-down" size={14} color={theme.colors.text} />
+                        <Octicons name="arrow-down" size={14} color={theme.colors.button.primary.tint} />
                     </Pressable>
                 </View>
             )}
@@ -493,6 +493,10 @@ function isCollapsibleDisplayItem(item: DisplayItem): item is ToolGroupItem | Ex
 }
 
 const styles = StyleSheet.create((theme) => ({
+    chatSurface: {
+        flex: 1,
+        backgroundColor: theme.colors.surface,
+    },
     scrollButtonContainer: {
         position: 'absolute',
         left: 0,
@@ -503,13 +507,13 @@ const styles = StyleSheet.create((theme) => ({
         pointerEvents: 'box-none',
     },
     scrollButton: {
-        borderRadius: 16,
-        width: 32,
-        height: 32,
+        borderRadius: 18,
+        width: 36,
+        height: 36,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: theme.colors.divider,
+        borderWidth: 0,
+        borderColor: 'transparent',
         shadowColor: theme.colors.shadow.color,
         shadowOffset: { width: 0, height: 1 },
         shadowRadius: 2,
@@ -517,11 +521,11 @@ const styles = StyleSheet.create((theme) => ({
         elevation: 2,
     },
     scrollButtonDefault: {
-        backgroundColor: theme.colors.surface,
-        opacity: 0.9,
+        backgroundColor: theme.colors.button.primary.background,
+        opacity: 0.94,
     },
     scrollButtonPressed: {
-        backgroundColor: theme.colors.surface,
+        backgroundColor: theme.colors.button.primary.background,
         opacity: 0.7,
     },
 }));

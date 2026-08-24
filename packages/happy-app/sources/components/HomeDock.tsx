@@ -245,7 +245,7 @@ const styles = StyleSheet.create((theme) => ({
         backgroundColor: theme.colors.surfaceHighest,
     },
     sendButtonActive: {
-        backgroundColor: theme.dark ? '#F5F5F5' : theme.colors.button.primary.background,
+        backgroundColor: theme.colors.button.primary.background,
     },
     modalRoot: {
         flex: 1,
@@ -1063,7 +1063,7 @@ export const HomeDock = React.memo(({
                             name="arrow-up"
                             size={16}
                             color={canSubmit
-                                ? theme.dark ? '#111111' : theme.colors.button.primary.tint
+                                ? theme.colors.button.primary.tint
                                 : theme.colors.textSecondary}
                         />
                     )}
@@ -1220,7 +1220,7 @@ export const HomeDock = React.memo(({
                                 name="arrow-up"
                                 size={16}
                                 color={canSubmit
-                                    ? theme.dark ? '#111111' : theme.colors.button.primary.tint
+                                    ? theme.colors.button.primary.tint
                                     : theme.colors.textSecondary}
                             />
                         )}

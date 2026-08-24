@@ -32,23 +32,22 @@ const stylesheet = StyleSheet.create((theme) => ({
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'stretch',
-        backgroundColor: theme.colors.groupped.background,
+        backgroundColor: theme.colors.surface,
     },
     contentContainer: {
         flex: 1,
         maxWidth: layout.maxWidth,
     },
     headerSection: {
-        backgroundColor: theme.colors.groupped.background,
-        paddingHorizontal: 24,
-        paddingTop: 20,
-        paddingBottom: 8,
+        backgroundColor: theme.colors.surface,
+        paddingHorizontal: 20,
+        paddingTop: 18,
+        paddingBottom: 6,
     },
     headerText: {
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: '600',
         color: theme.colors.groupped.sectionTitle,
-        letterSpacing: 0.1,
         ...Typography.default('semiBold'),
     },
     projectGroup: {
@@ -69,51 +68,51 @@ const stylesheet = StyleSheet.create((theme) => ({
         ...Typography.default(),
     },
     sessionItem: {
-        height: 88,
+        height: 78,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
+        paddingHorizontal: 14,
         backgroundColor: 'transparent',
     },
     sessionItemContainer: {
-        marginHorizontal: 16,
-        marginBottom: 1,
+        marginHorizontal: 8,
+        marginBottom: 2,
         overflow: 'hidden',
-        backgroundColor: theme.colors.surface,
-        borderWidth: Platform.select({ web: 0, default: StyleSheet.hairlineWidth }),
-        borderColor: theme.colors.divider,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        borderColor: 'transparent',
     },
     sessionItemFirst: {
-        borderTopLeftRadius: 12,
-        borderTopRightRadius: 12,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
     },
     sessionItemLast: {
-        borderBottomLeftRadius: 12,
-        borderBottomRightRadius: 12,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
     },
     sessionItemSingle: {
-        borderRadius: 12,
+        borderRadius: 20,
     },
     sessionItemContainerFirst: {
-        borderTopLeftRadius: 12,
-        borderTopRightRadius: 12,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
     },
     sessionItemContainerLast: {
-        borderBottomLeftRadius: 12,
-        borderBottomRightRadius: 12,
-        marginBottom: 12,
+        borderBottomLeftRadius: 20,
+        borderBottomRightRadius: 20,
+        marginBottom: 10,
     },
     sessionItemContainerSingle: {
-        borderRadius: 12,
-        marginBottom: 12,
+        borderRadius: 20,
+        marginBottom: 10,
     },
     sessionItemSelected: {
         backgroundColor: theme.colors.surfaceSelected,
     },
     sessionContent: {
         flex: 1,
-        marginLeft: 16,
-        paddingRight: Platform.select({ web: 0, default: 48 }),
+        marginLeft: 14,
+        paddingRight: Platform.select({ web: 0, default: 34 }),
         justifyContent: 'center',
     },
     sessionTitleRow: {
@@ -122,8 +121,8 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginBottom: 2,
     },
     sessionTitle: {
-        fontSize: 15,
-        fontWeight: '500',
+        fontSize: 17,
+        fontWeight: '600',
         flex: 1,
         ...Typography.default('semiBold'),
     },
@@ -144,7 +143,7 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginBottom: 4,
     },
     sessionSubtitle: {
-        fontSize: 13,
+        fontSize: 14,
         color: theme.colors.textSecondary,
         flexShrink: 1,
         ...Typography.default(),
@@ -161,15 +160,15 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginRight: 4,
     },
     statusText: {
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: '500',
         lineHeight: 16,
         ...Typography.default(),
     },
     avatarContainer: {
         position: 'relative',
-        width: 48,
-        height: 48,
+        width: 56,
+        height: 56,
     },
     draftIconContainer: {
         position: 'absolute',
@@ -190,16 +189,16 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     pictureButton: {
         position: 'absolute',
-        right: 12,
-        top: 20,
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        left: 52,
+        top: 46,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: theme.colors.surfaceHigh,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.divider,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 2,
+        borderColor: theme.colors.surface,
     },
     pictureButtonIcon: {
         color: theme.colors.text,
@@ -518,7 +517,7 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                 <SessionProfilePictureAvatar
                     sessionId={session.id}
                     avatarId={session.avatarId}
-                    size={48}
+                    size={56}
                     monochrome={!status.isConnected}
                     flavor={session.flavor}
                     clientId={session.clientId}
@@ -591,7 +590,7 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                     pressed && { opacity: 0.72 },
                 ]}
             >
-                <Ionicons name="camera" size={20} style={styles.pictureButtonIcon} />
+                <Ionicons name="camera" size={15} style={styles.pictureButtonIcon} />
             </Pressable>
         )}
         {Platform.OS === 'web' && (

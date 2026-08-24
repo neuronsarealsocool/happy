@@ -41,18 +41,18 @@ export const lightTheme = {
         text: '#000000',
         textDestructive: Platform.select({ ios: '#FF3B30', default: '#F44336' }),
         textSecondary: Platform.select({ ios: '#8E8E93', default: '#49454F' }),
-        textLink: '#2BACCC',
+        textLink: '#0084FF',
         deleteAction: '#FF6B6B', // Delete/remove button color
         warningCritical: '#FF3B30',
         warning: '#8E8E93',
         success: '#34C759',
         surface: '#ffffff',
         surfaceRipple: 'rgba(0, 0, 0, 0.08)',
-        surfacePressed: '#f0f0f2',
-        surfaceSelected: Platform.select({ ios: '#C6C6C8', default: '#eaeaea' }),
+        surfacePressed: '#E8F3FF',
+        surfaceSelected: '#E5F1FF',
         surfacePressedOverlay: Platform.select({ ios: '#D1D1D6', default: 'transparent' }),
-        surfaceHigh: '#F8F8F8',
-        surfaceHighest: '#f0f0f0',
+        surfaceHigh: '#F0F2F5',
+        surfaceHighest: '#E4E6EB',
         divider: Platform.select({ ios: '#eaeaea', default: '#eaeaea' }),
         shadow: {
             color: Platform.select({ default: '#000000', web: 'rgba(0, 0, 0, 0.1)' }),
@@ -79,13 +79,13 @@ export const lightTheme = {
         //
 
         groupped: {
-            background: Platform.select({ ios: '#F2F2F7', default: '#F5F5F5' }),
+            background: '#FFFFFF',
             chevron: Platform.select({ ios: '#C7C7CC', default: '#49454F' }),
             sectionTitle: Platform.select({ ios: '#8E8E93', default: '#49454F' }),
         },
         header: {
             background: '#ffffff',
-            tint: '#18171C'
+            tint: '#0084FF'
         },
         switch: {
             track: {
@@ -103,16 +103,16 @@ export const lightTheme = {
             icon: '#FFFFFF',
         },
         radio: {
-            active: '#007AFF',
+            active: '#0084FF',
             inactive: '#C0C0C0',
-            dot: '#007AFF',
+            dot: '#0084FF',
         },
         modal: {
             border: 'rgba(0, 0, 0, 0.1)'
         },
         button: {
             primary: {
-                background: '#000000',
+                background: '#0084FF',
                 tint: '#FFFFFF',
                 disabled: '#C0C0C0',
             },
@@ -121,7 +121,7 @@ export const lightTheme = {
             }
         },
         input: {
-            background: '#F5F5F5',
+            background: '#F0F2F5',
             text: '#000000',
             placeholder: '#999999',
         },
@@ -144,7 +144,7 @@ export const lightTheme = {
 
         status: {
             connected: '#34C759',
-            connecting: '#007AFF',
+            connecting: '#0084FF',
             disconnected: '#999999',
             error: '#FF3B30',
             default: '#8E8E93',
@@ -153,7 +153,7 @@ export const lightTheme = {
         // Permission mode colors
         permission: {
             default: '#8E8E93',
-            acceptEdits: '#007AFF',
+            acceptEdits: '#0084FF',
             bypass: '#FF9500',
             plan: '#34C759',
             readOnly: '#8B8B8D',
@@ -172,7 +172,7 @@ export const lightTheme = {
                 text: '#FFFFFF',
             },
             allowAll: {
-                background: '#007AFF',
+                background: '#0084FF',
                 text: '#FFFFFF',
             },
             inactive: {
@@ -214,8 +214,8 @@ export const lightTheme = {
         },
 
         // Message View colors
-        userMessageBackground: '#f0eee6',
-        userMessageText: '#000000',
+        userMessageBackground: '#0084FF',
+        userMessageText: '#FFFFFF',
         agentMessageText: '#000000',
         agentEventText: '#666666',
 
@@ -265,7 +265,7 @@ export const darkTheme = {
         text: '#ffffff',
         textDestructive: Platform.select({ ios: '#FF453A', default: '#F48FB1' }),
         textSecondary: Platform.select({ ios: '#8E8E93', default: '#CAC4D0' }),
-        textLink: '#2BACCC',
+        textLink: '#0084FF',
         deleteAction: '#FF6B6B', // Delete/remove button color (same in both themes)
         warningCritical: '#FF453A',
         warning: '#8E8E93',
@@ -275,7 +275,7 @@ export const darkTheme = {
         surface: Platform.select({ web: '#212121', default: '#161616' }),
         surfaceRipple: Platform.select({ web: 'rgba(255, 255, 255, 0.08)', default: 'rgba(255, 255, 255, 0.07)' }),
         surfacePressed: Platform.select({ web: '#2C2C2E', default: '#242424' }),
-        surfaceSelected: Platform.select({ web: '#2C2C2E', default: '#242424' }),
+        surfaceSelected: 'rgba(0, 132, 255, 0.22)',
         surfacePressedOverlay: Platform.select({ web: 'transparent', default: '#242424' }),
         surfaceHigh: Platform.select({ web: '#171717', default: '#1E1E1E' }),
         surfaceHighest: Platform.select({ web: '#292929', default: '#282828' }),
@@ -306,7 +306,7 @@ export const darkTheme = {
 
         header: {
             background: Platform.select({ web: '#212121', default: '#000000' }),
-            tint: '#ffffff'
+            tint: '#0084FF'
         },
         switch: {
             track: {
@@ -329,16 +329,16 @@ export const darkTheme = {
             icon: '#000000',
         },
         radio: {
-            active: '#0A84FF',
+            active: '#0084FF',
             inactive: '#48484A',
-            dot: '#0A84FF',
+            dot: '#0084FF',
         },
         modal: {
             border: 'rgba(255, 255, 255, 0.1)'
         },
         button: {
             primary: {
-                background: '#000000',
+                background: '#0084FF',
                 tint: '#FFFFFF',
                 disabled: '#C0C0C0',
             },
@@ -370,7 +370,7 @@ export const darkTheme = {
 
         status: { // App Connection Status
             connected: '#34C759',
-            connecting: '#FFFFFF',
+            connecting: '#0084FF',
             disconnected: '#8E8E93',
             error: '#FF453A',
             default: '#8E8E93',
@@ -379,7 +379,7 @@ export const darkTheme = {
         // Permission mode colors
         permission: {
             default: '#8E8E93',
-            acceptEdits: '#0A84FF',
+            acceptEdits: '#0084FF',
             bypass: '#FF9F0A',
             plan: '#32D74B',
             readOnly: '#98989D',
@@ -398,7 +398,7 @@ export const darkTheme = {
                 text: '#FFFFFF',
             },
             allowAll: {
-                background: '#0A84FF',
+                background: '#0084FF',
                 text: '#FFFFFF',
             },
             inactive: {
@@ -440,7 +440,7 @@ export const darkTheme = {
         },
 
         // Message View colors
-        userMessageBackground: '#2C2C2E',
+        userMessageBackground: '#0084FF',
         userMessageText: '#FFFFFF',
         agentMessageText: '#FFFFFF',
         agentEventText: '#8E8E93',

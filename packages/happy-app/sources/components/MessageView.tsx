@@ -188,7 +188,7 @@ function UserTextBlock(props: {
       <View style={styles.userMessageContainer}>
         <CopyHoverFrame text={props.message.displayText || props.message.text} align="right">
           <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle, styles.goalMessageBubble]}>
-            <MarkdownView markdown={parsed.goal} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+            <MarkdownView markdown={parsed.goal} onOptionPress={handleOptionPress} sessionId={props.sessionId} textColor={theme.colors.userMessageText} />
           </View>
         </CopyHoverFrame>
         <View style={styles.goalSentRow}>
@@ -204,7 +204,7 @@ function UserTextBlock(props: {
         {parsed.args ? (
           <CopyHoverFrame text={props.message.displayText || props.message.text} align="right">
             <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle, styles.commandMessageBubble]}>
-              <MarkdownView markdown={parsed.args} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+              <MarkdownView markdown={parsed.args} onOptionPress={handleOptionPress} sessionId={props.sessionId} textColor={theme.colors.userMessageText} />
             </View>
           </CopyHoverFrame>
         ) : null}
@@ -221,7 +221,7 @@ function UserTextBlock(props: {
           without also opening the rewind picker. Rewind remains in session actions. */}
       <CopyHoverFrame text={props.message.displayText || props.message.text} align="right">
         <View style={[styles.userMessageBubble, styles.userMessageBubbleSolid, bubbleStyle]}>
-          <MarkdownView markdown={parsed.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+          <MarkdownView markdown={parsed.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} textColor={theme.colors.userMessageText} />
         </View>
       </CopyHoverFrame>
     </View>
@@ -245,7 +245,9 @@ function AgentTextBlock(props: {
   return (
     <View style={styles.agentMessageContainer}>
       <CopyHoverFrame text={props.message.text} align="left">
-        <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+        <View style={styles.agentMessageBubble}>
+          <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+        </View>
       </CopyHoverFrame>
       <ArtifactActionRow
         text={props.message.text}
@@ -420,18 +422,18 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: 'column',
     alignItems: 'flex-end',
     justifyContent: 'flex-end',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
   },
   userMessageBubble: {
     backgroundColor: theme.colors.userMessageBackground,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 12,
-    maxWidth: '100%',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    marginBottom: 8,
+    maxWidth: '84%',
   },
   userMessageBubbleSolid: {
-    borderWidth: Platform.select({ web: 0, default: StyleSheet.hairlineWidth }),
+    borderWidth: 0,
     overflow: 'hidden',
   },
   goalMessageBubble: {
@@ -454,32 +456,40 @@ const styles = StyleSheet.create((theme) => ({
   },
   commandChip: {
     backgroundColor: theme.colors.userMessageBackground,
-    borderColor: theme.colors.divider,
-    borderWidth: 1,
+    borderColor: theme.colors.userMessageBackground,
+    borderWidth: 0,
     paddingHorizontal: 10,
-    paddingVertical: 2,
-    borderRadius: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
     marginBottom: 12,
     maxWidth: '100%',
-    opacity: 0.65,
   },
   commandChipText: {
-    color: theme.colors.input.text,
+    color: theme.colors.userMessageText,
     fontSize: 13,
     fontFamily: 'monospace',
   },
   agentMessageContainer: {
-    marginHorizontal: 16,
+    alignItems: 'flex-start',
+    marginHorizontal: 12,
     marginTop: 4,
-    marginBottom: 16,
-    borderRadius: 16,
+    marginBottom: 8,
+    borderRadius: 20,
     maxWidth: '100%',
+  },
+  agentMessageBubble: {
+    maxWidth: '86%',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: theme.colors.surfaceHigh,
   },
   artifactRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 2,
+    marginTop: 6,
+    maxWidth: '86%',
   },
   artifactButton: {
     minWidth: 0,

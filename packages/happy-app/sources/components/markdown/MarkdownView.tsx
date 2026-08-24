@@ -30,6 +30,7 @@ export const MarkdownView = React.memo((props: {
     markdown: string;
     onOptionPress?: (option: Option) => void;
     sessionId?: string;
+    textColor?: string;
 }) => {
     const blocks = React.useMemo(() => parseMarkdown(props.markdown), [props.markdown]);
     
@@ -78,15 +79,15 @@ export const MarkdownView = React.memo((props: {
             <View style={{ width: '100%' }}>
                 {blocks.map((block, index) => {
                     if (block.type === 'text') {
-                        return <RenderTextBlock spans={block.content} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} />;
+                        return <RenderTextBlock spans={block.content} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} textColor={props.textColor} />;
                     } else if (block.type === 'header') {
-                        return <RenderHeaderBlock level={block.level} spans={block.content} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} />;
+                        return <RenderHeaderBlock level={block.level} spans={block.content} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} textColor={props.textColor} />;
                     } else if (block.type === 'horizontal-rule') {
                         return <View style={style.horizontalRule} key={index} />;
                     } else if (block.type === 'list') {
-                        return <RenderListBlock items={block.items} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} />;
+                        return <RenderListBlock items={block.items} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} textColor={props.textColor} />;
                     } else if (block.type === 'numbered-list') {
-                        return <RenderNumberedListBlock items={block.items} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} />;
+                        return <RenderNumberedListBlock items={block.items} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} onLinkPress={handleLinkPress} textColor={props.textColor} />;
                     } else if (block.type === 'code-block') {
                         return <RenderCodeBlock content={block.content} language={block.language} key={index} first={index === 0} last={index === blocks.length - 1} selectable={selectable} />;
                     } else if (block.type === 'mermaid') {
@@ -142,20 +143,24 @@ type RenderSpanProps = {
     onLinkPress: (url: string) => void;
 };
 
-function RenderTextBlock(props: { spans: MarkdownSpan[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void }) {
-    return <Text selectable={props.selectable} style={[style.text, props.first && style.first, props.last && style.last]}><RenderSpans spans={props.spans} baseStyle={style.text} selectable={props.selectable} onLinkPress={props.onLinkPress} /></Text>;
+function RenderTextBlock(props: { spans: MarkdownSpan[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void, textColor?: string }) {
+    const colorStyle = props.textColor ? { color: props.textColor } : null;
+    const textStyle = [style.text, colorStyle, props.first && style.first, props.last && style.last];
+    return <Text selectable={props.selectable} style={textStyle}><RenderSpans spans={props.spans} baseStyle={[style.text, colorStyle]} selectable={props.selectable} onLinkPress={props.onLinkPress} /></Text>;
 }
 
-function RenderHeaderBlock(props: { level: 1 | 2 | 3 | 4 | 5 | 6, spans: MarkdownSpan[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void }) {
+function RenderHeaderBlock(props: { level: 1 | 2 | 3 | 4 | 5 | 6, spans: MarkdownSpan[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void, textColor?: string }) {
     const s = (style as any)[`header${props.level}`];
-    const headerStyle = [style.header, s, props.first && style.first, props.last && style.last];
+    const colorStyle = props.textColor ? { color: props.textColor } : null;
+    const headerStyle = [style.header, s, colorStyle, props.first && style.first, props.last && style.last];
     return <Text selectable={props.selectable} style={headerStyle}><RenderSpans spans={props.spans} baseStyle={headerStyle} selectable={props.selectable} onLinkPress={props.onLinkPress} /></Text>;
 }
 
 const BULLETS = ['•', '◦', '▪'] as const;
 
-function RenderListBlock(props: { items: { depth: number, spans: MarkdownSpan[] }[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void }) {
-    const listStyle = [style.text, style.list];
+function RenderListBlock(props: { items: { depth: number, spans: MarkdownSpan[] }[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void, textColor?: string }) {
+    const colorStyle = props.textColor ? { color: props.textColor } : null;
+    const listStyle = [style.text, style.list, colorStyle];
     return (
         <View style={{ flexDirection: 'column', marginBottom: 8, gap: 6 }}>
             {props.items.map((item, index) => (
@@ -168,8 +173,9 @@ function RenderListBlock(props: { items: { depth: number, spans: MarkdownSpan[] 
     );
 }
 
-function RenderNumberedListBlock(props: { items: { number: number, depth: number, spans: MarkdownSpan[] }[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void }) {
-    const listStyle = [style.text, style.list];
+function RenderNumberedListBlock(props: { items: { number: number, depth: number, spans: MarkdownSpan[] }[], first: boolean, last: boolean, selectable: boolean, onLinkPress: (url: string) => void, textColor?: string }) {
+    const colorStyle = props.textColor ? { color: props.textColor } : null;
+    const listStyle = [style.text, style.list, colorStyle];
     return (
         <View style={{ flexDirection: 'column', marginBottom: 8, gap: 6 }}>
             {props.items.map((item, index) => (
