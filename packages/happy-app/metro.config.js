@@ -34,6 +34,30 @@ const preactCjsPath = require.resolve('preact');
 const preactHooksCjsPath = require.resolve('preact/hooks');
 const baseResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName.startsWith('@/')) {
+    const sourcePath = path.join(__dirname, 'sources', moduleName.slice(2));
+    const candidates = [
+      sourcePath,
+      `${sourcePath}.ts`,
+      `${sourcePath}.tsx`,
+      `${sourcePath}.js`,
+      `${sourcePath}.jsx`,
+      path.join(sourcePath, 'index.ts'),
+      path.join(sourcePath, 'index.tsx'),
+      path.join(sourcePath, 'index.js'),
+      path.join(sourcePath, 'index.jsx'),
+    ];
+    const filePath = candidates.find((candidate) => {
+      try {
+        return fs.statSync(candidate).isFile();
+      } catch {
+        return false;
+      }
+    });
+    if (filePath) {
+      return { filePath, type: 'sourceFile' };
+    }
+  }
   if (moduleName === 'preact') {
     return { filePath: preactCjsPath, type: 'sourceFile' };
   }
