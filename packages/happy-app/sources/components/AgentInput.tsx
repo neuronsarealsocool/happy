@@ -37,7 +37,6 @@ import { NativeSettingsMenu, type NativeSettingsMenuGroup } from './NativeSettin
 import { ProviderIcon } from './ProviderIcon';
 import { isRigMetadata } from '@/sync/rig';
 import {
-    MOBILE_COMPOSER_LAYOUT,
     MOBILE_COMPOSER_METRICS,
     resolveMobileComposerActionGeometry,
     resolveMobileComposerActionRowGeometry,
@@ -151,30 +150,22 @@ const stylesheet = StyleSheet.create((theme, runtime) => ({
         paddingHorizontal: 8,
     },
     unifiedPanelShadow: {
-        borderRadius: 24,
-        shadowColor: theme.colors.shadow.color,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.22,
-        shadowRadius: 16,
-        elevation: 4,
+        borderRadius: Platform.OS === 'web' ? 24 : 0,
+        shadowOpacity: Platform.OS === 'web' ? 0.22 : 0,
+        elevation: Platform.OS === 'web' ? 4 : 0,
     },
     mobileUnifiedPanel: {
         // The frosted material is supplied by MobileGlassSurface. The dense
         // tint keeps the transcript illegible behind it without losing glass.
-        backgroundColor: Platform.select({
-            ios: 'transparent',
-            android: theme.colors.glass.backgroundStrong,
-            default: theme.colors.input.background,
-        }),
-        borderRadius: MOBILE_COMPOSER_METRICS.shellRadius,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.glass.border,
-        paddingHorizontal: MOBILE_COMPOSER_METRICS.shellInset,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 0,
+        borderWidth: 0,
+        paddingHorizontal: 12,
         paddingTop: MOBILE_COMPOSER_METRICS.shellPaddingTop,
         paddingBottom: MOBILE_COMPOSER_METRICS.shellPaddingBottom,
     },
     mobileUnifiedPanelShadow: {
-        borderRadius: MOBILE_COMPOSER_METRICS.shellRadius,
+        borderRadius: 0,
     },
     inputContainer: {
         flexDirection: 'row',
@@ -193,10 +184,13 @@ const stylesheet = StyleSheet.create((theme, runtime) => ({
         minHeight: MOBILE_COMPOSER_METRICS.inputMinHeight,
         // 18pt from the outer edge: 10pt shell inset plus the 8pt inset from
         // the add button edge to the 26pt glyph.
-        paddingLeft: MOBILE_COMPOSER_LAYOUT.inputContainerPaddingLeft,
-        paddingRight: MOBILE_COMPOSER_LAYOUT.inputContainerPaddingRight,
+        paddingLeft: 18,
+        paddingRight: 18,
         paddingTop: MOBILE_COMPOSER_METRICS.inputPaddingTop,
         paddingBottom: MOBILE_COMPOSER_METRICS.inputPaddingBottom,
+        borderRadius: 22,
+        backgroundColor: '#F0F2F5',
+        marginBottom: 6,
     },
 
     // Overlay styles
@@ -403,10 +397,10 @@ const stylesheet = StyleSheet.create((theme, runtime) => ({
     },
     mobilePrimaryButton: MOBILE_PRIMARY_ACTION_GEOMETRY,
     mobilePrimaryButtonActive: {
-        backgroundColor: theme.colors.surfaceHighest,
+        backgroundColor: '#FFFFFF',
     },
     mobilePrimaryButtonInactive: {
-        backgroundColor: theme.dark ? '#3A3A3C' : '#D1D1D6',
+        backgroundColor: '#FFFFFF',
     },
     mobileStopButton: {
         backgroundColor: theme.dark ? '#F5F5F5' : theme.colors.button.primary.background,
@@ -699,7 +693,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     const compactMobileComposer = Platform.OS !== 'web' && !runningOnMac && screenWidth <= 700;
     const useNativeSettingsMenus = compactMobileComposer
         || shouldUseExpoNativeSettingsMenu(Platform.OS, runningOnMac);
-    const activeSendIconColor = compactMobileComposer ? theme.colors.text : theme.colors.button.primary.tint;
+    const activeSendIconColor = compactMobileComposer ? '#0084FF' : theme.colors.button.primary.tint;
     const isSendBlocked = props.blockSend ?? false;
 
     // `hasText` drives only the send-button appearance/enabled state. It's
@@ -2015,8 +2009,8 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     name="add"
                                     size={MOBILE_COMPOSER_METRICS.addIconSize}
                                     color={(props.selectedImages?.length ?? 0) > 0
-                                        ? theme.colors.radio.active
-                                        : theme.colors.text}
+                                        ? '#0084FF'
+                                        : '#0084FF'}
                                 />
                             </BubblePressable>
                         )}
@@ -2031,7 +2025,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     style={styles.mobileIconMenuFrame}
                                 >
                                     <View style={styles.mobileIconMenuContent}>
-                                        <Ionicons name="settings-outline" size={20} color={theme.colors.text} />
+                                        <Ionicons name="settings-outline" size={20} color="#0084FF" />
                                     </View>
                                 </NativeSettingsMenu>
                             ) : (
@@ -2044,7 +2038,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                         ? t('agentInput.codexPermissionMode.title')
                                         : t('agentInput.permissionMode.title')}
                                 >
-                                    <Ionicons name="settings-outline" size={20} color={theme.colors.text} />
+                                    <Ionicons name="settings-outline" size={20} color="#0084FF" />
                                 </BubblePressable>
                             )
                         )}
@@ -2135,7 +2129,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                 accessibilityRole="button"
                                 accessibilityLabel={props.agentType}
                             >
-                                <Octicons name="cpu" size={14} color={theme.colors.text} />
+                                <Octicons name="cpu" size={14} color="#0084FF" />
                             </BubblePressable>
                         )}
 

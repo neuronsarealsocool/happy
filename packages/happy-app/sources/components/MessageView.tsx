@@ -10,13 +10,18 @@ import { Metadata } from "@/sync/storageTypes";
 import { ToolView } from "./tools/ToolView";
 import { AgentEvent } from "@/sync/typesRaw";
 import { sync } from '@/sync/sync';
-import { useSetting } from '@/sync/storage';
+import { useSession, useSetting } from '@/sync/storage';
 import { Option } from './markdown/MarkdownView';
 import { layout } from "./layout";
 import { parseLocalCommandMessage, isUserSlashCommandEcho } from './parseLocalCommandMessage';
 import { resolveUserMessageBubbleColor } from '@/utils/userMessageBubbleColor';
 import { discoverPreviewTargetsInText, type SessionPreviewTargetKind } from '@/utils/sessionPreviewTargets';
 import { registerSessionPreview } from '@/-session/sessionPreviewStore';
+import { SessionProfilePictureAvatar } from './SessionProfilePictureAvatar';
+import { getSessionAvatarId } from '@/utils/sessionUtils';
+
+const MESSENGER_BLUE = '#0084FF';
+const MESSENGER_INCOMING = '#F0F2F5';
 
 function CopyHoverFrame(props: {
   text: string;
@@ -154,7 +159,9 @@ function UserTextBlock(props: {
 
   const userMessageBubbleColor = useSetting('userMessageBubbleColor');
   const { theme } = useUnistyles();
-  const bubblePalette = resolveUserMessageBubbleColor(userMessageBubbleColor, theme.dark);
+  const bubblePalette = Platform.OS === 'web'
+    ? resolveUserMessageBubbleColor(userMessageBubbleColor, theme.dark)
+    : { background: MESSENGER_BLUE, border: MESSENGER_BLUE };
   const bubbleStyle = {
     backgroundColor: bubblePalette.background,
     borderColor: bubblePalette.border,
@@ -236,6 +243,7 @@ function AgentTextBlock(props: {
   const handleOptionPress = React.useCallback((option: Option) => {
     sync.sendMessage(props.sessionId, option.title, { source: 'option' });
   }, [props.sessionId]);
+  const session = useSession(props.sessionId);
 
   // Hide thinking messages
   if (props.message.isThinking) {
@@ -244,16 +252,33 @@ function AgentTextBlock(props: {
 
   return (
     <View style={styles.agentMessageContainer}>
-      <CopyHoverFrame text={props.message.text} align="left">
-        <View style={styles.agentMessageBubble}>
-          <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+      <View style={styles.agentMessageRow}>
+        {Platform.OS !== 'web' && session ? (
+          <View style={styles.agentAvatarSlot}>
+            <SessionProfilePictureAvatar
+              sessionId={props.sessionId}
+              avatarId={getSessionAvatarId(session)}
+              size={34}
+              monochrome={false}
+              flavor={props.metadata?.flavor}
+              clientId={props.metadata?.client?.id}
+            />
+            <View style={styles.agentOnlineDot} />
+          </View>
+        ) : null}
+        <View style={styles.agentBubbleColumn}>
+          <CopyHoverFrame text={props.message.text} align="left">
+            <View style={styles.agentMessageBubble}>
+              <MarkdownView markdown={props.message.text} onOptionPress={handleOptionPress} sessionId={props.sessionId} />
+            </View>
+          </CopyHoverFrame>
+          <ArtifactActionRow
+            text={props.message.text}
+            projectPath={props.metadata?.path}
+            sessionId={props.sessionId}
+          />
         </View>
-      </CopyHoverFrame>
-      <ArtifactActionRow
-        text={props.message.text}
-        projectPath={props.metadata?.path}
-        sessionId={props.sessionId}
-      />
+      </View>
     </View>
   );
 }
@@ -426,11 +451,11 @@ const styles = StyleSheet.create((theme) => ({
   },
   userMessageBubble: {
     backgroundColor: theme.colors.userMessageBackground,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    marginBottom: 8,
-    maxWidth: '84%',
+    paddingHorizontal: Platform.OS === 'web' ? 14 : 18,
+    paddingVertical: Platform.OS === 'web' ? 7 : 10,
+    borderRadius: Platform.OS === 'web' ? 20 : 22,
+    marginBottom: Platform.OS === 'web' ? 8 : 10,
+    maxWidth: Platform.OS === 'web' ? '84%' : '76%',
   },
   userMessageBubbleSolid: {
     borderWidth: 0,
@@ -471,18 +496,49 @@ const styles = StyleSheet.create((theme) => ({
   },
   agentMessageContainer: {
     alignItems: 'flex-start',
-    marginHorizontal: 12,
+    marginHorizontal: Platform.OS === 'web' ? 12 : 14,
     marginTop: 4,
-    marginBottom: 8,
+    marginBottom: Platform.OS === 'web' ? 8 : 10,
     borderRadius: 20,
     maxWidth: '100%',
   },
+  agentMessageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    maxWidth: '100%',
+  },
+  agentAvatarSlot: {
+    width: 42,
+    height: 42,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    flexShrink: 0,
+  },
+  agentOnlineDot: {
+    position: 'absolute',
+    right: 1,
+    bottom: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#31C735',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  agentBubbleColumn: {
+    maxWidth: Platform.OS === 'web' ? '100%' : '78%',
+    flexShrink: 1,
+  },
   agentMessageBubble: {
-    maxWidth: '86%',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: theme.colors.surfaceHigh,
+    maxWidth: Platform.OS === 'web' ? '86%' : '100%',
+    paddingHorizontal: Platform.OS === 'web' ? 14 : 18,
+    paddingVertical: Platform.OS === 'web' ? 7 : 10,
+    borderRadius: Platform.OS === 'web' ? 20 : 22,
+    backgroundColor: Platform.OS === 'web'
+      ? theme.colors.surfaceHigh
+      : theme.dark ? '#2F3136' : MESSENGER_INCOMING,
   },
   artifactRow: {
     flexDirection: 'row',

@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Pressable, FlatList, NativeScrollEvent, NativeSyntheticEvent, Platform } from 'react-native';
+import { View, Pressable, FlatList, NativeScrollEvent, NativeSyntheticEvent, Platform, ScrollView } from 'react-native';
 import { Text } from '@/components/StyledText';
-import { usePathname } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { SessionListViewItem, SessionRowData } from '@/sync/storage';
 import { filterProjectGroup, sessionMatchesQuery } from '@/sync/projectGroups';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +24,9 @@ import { t } from '@/text';
 import { SessionShortcutHintBadge } from './ShortcutHints';
 import { ProviderIcon } from './ProviderIcon';
 import { SessionProfilePictureAvatar } from './SessionProfilePictureAvatar';
-import { pickAndSaveSessionProfilePicture } from '@/utils/sessionProfilePictures';
+
+const MESSENGER_BLUE = '#0084FF';
+const MESSENGER_ONLINE = '#31C735';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -40,14 +42,14 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     headerSection: {
         backgroundColor: theme.colors.surface,
-        paddingHorizontal: 20,
-        paddingTop: 18,
-        paddingBottom: 6,
+        paddingHorizontal: Platform.OS === 'web' ? 20 : 26,
+        paddingTop: Platform.OS === 'web' ? 18 : 20,
+        paddingBottom: Platform.OS === 'web' ? 6 : 8,
     },
     headerText: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: theme.colors.groupped.sectionTitle,
+        fontSize: Platform.OS === 'web' ? 13 : 20,
+        fontWeight: Platform.OS === 'web' ? '600' : '800',
+        color: Platform.OS === 'web' ? theme.colors.groupped.sectionTitle : '#111111',
         ...Typography.default('semiBold'),
     },
     projectGroup: {
@@ -68,10 +70,10 @@ const stylesheet = StyleSheet.create((theme) => ({
         ...Typography.default(),
     },
     sessionItem: {
-        height: 78,
+        height: Platform.OS === 'web' ? 78 : 92,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 14,
+        paddingHorizontal: Platform.OS === 'web' ? 14 : 22,
         backgroundColor: 'transparent',
     },
     sessionItemContainer: {
@@ -111,8 +113,8 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     sessionContent: {
         flex: 1,
-        marginLeft: 14,
-        paddingRight: Platform.select({ web: 0, default: 34 }),
+        marginLeft: Platform.OS === 'web' ? 14 : 18,
+        paddingRight: Platform.select({ web: 0, default: 12 }),
         justifyContent: 'center',
     },
     sessionTitleRow: {
@@ -121,8 +123,8 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginBottom: 2,
     },
     sessionTitle: {
-        fontSize: 17,
-        fontWeight: '600',
+        fontSize: Platform.OS === 'web' ? 17 : 20,
+        fontWeight: Platform.OS === 'web' ? '600' : '800',
         flex: 1,
         ...Typography.default('semiBold'),
     },
@@ -143,7 +145,7 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginBottom: 4,
     },
     sessionSubtitle: {
-        fontSize: 14,
+        fontSize: Platform.OS === 'web' ? 14 : 17,
         color: theme.colors.textSecondary,
         flexShrink: 1,
         ...Typography.default(),
@@ -151,6 +153,7 @@ const stylesheet = StyleSheet.create((theme) => ({
     statusRow: {
         flexDirection: 'row',
         alignItems: 'center',
+        display: Platform.OS === 'web' ? 'flex' : 'none',
     },
     statusDotContainer: {
         alignItems: 'center',
@@ -167,8 +170,8 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     avatarContainer: {
         position: 'relative',
-        width: 56,
-        height: 56,
+        width: Platform.OS === 'web' ? 56 : 64,
+        height: Platform.OS === 'web' ? 56 : 64,
     },
     draftIconContainer: {
         position: 'absolute',
@@ -203,7 +206,155 @@ const stylesheet = StyleSheet.create((theme) => ({
     pictureButtonIcon: {
         color: theme.colors.text,
     },
+    messengerDiscovery: {
+        paddingHorizontal: 22,
+        paddingBottom: 14,
+        backgroundColor: '#FFFFFF',
+    },
+    messengerSearch: {
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#F0F2F5',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        gap: 10,
+        marginBottom: 18,
+    },
+    messengerSearchText: {
+        fontSize: 20,
+        color: '#65676B',
+        ...Typography.default(),
+    },
+    messengerStories: {
+        paddingRight: 8,
+    },
+    storyItem: {
+        width: 80,
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    createStoryCircle: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F0F2F5',
+        marginBottom: 8,
+    },
+    storyRing: {
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        borderWidth: 4,
+        borderColor: MESSENGER_BLUE,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 6,
+        backgroundColor: '#FFFFFF',
+    },
+    storyOnlineDot: {
+        position: 'absolute',
+        right: 2,
+        bottom: 8,
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        backgroundColor: MESSENGER_ONLINE,
+        borderWidth: 3,
+        borderColor: '#FFFFFF',
+    },
+    storyLabel: {
+        fontSize: 14,
+        lineHeight: 18,
+        color: '#1C1E21',
+        textAlign: 'center',
+        ...Typography.default(),
+    },
+    sessionMetaRight: {
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+        minWidth: 72,
+        gap: 12,
+    },
+    sessionTime: {
+        fontSize: 16,
+        color: '#65676B',
+        ...Typography.default(),
+    },
+    sessionTimeUnread: {
+        color: MESSENGER_BLUE,
+        fontWeight: '700',
+        ...Typography.default('semiBold'),
+    },
+    unreadDot: {
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        backgroundColor: MESSENGER_BLUE,
+    },
 }));
+
+function MessengerDiscoveryHeader({ sessions }: { sessions: SessionRowData[] }) {
+    const styles = stylesheet;
+    const router = useRouter();
+    const navigateToSession = useNavigateToSession();
+
+    if (Platform.OS === 'web') {
+        return <UpdateBanner />;
+    }
+
+    return (
+        <View style={styles.messengerDiscovery}>
+            <UpdateBanner />
+            <View style={styles.messengerSearch}>
+                <Ionicons name="search" size={24} color="#65676B" />
+                <Text style={styles.messengerSearchText}>Search</Text>
+            </View>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.messengerStories}
+            >
+                <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Create story"
+                    onPress={() => router.navigate('/new')}
+                    style={styles.storyItem}
+                >
+                    <View style={styles.createStoryCircle}>
+                        <Ionicons name="add" size={36} color={MESSENGER_BLUE} />
+                    </View>
+                    <Text style={styles.storyLabel} numberOfLines={2}>Create story</Text>
+                </Pressable>
+                {sessions.slice(0, 6).map((session) => (
+                    <Pressable
+                        key={session.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open ${session.name}`}
+                        onPress={() => navigateToSession(session.id)}
+                        style={styles.storyItem}
+                    >
+                        <View style={styles.storyRing}>
+                            <SessionProfilePictureAvatar
+                                sessionId={session.id}
+                                avatarId={session.avatarId}
+                                size={62}
+                                monochrome={false}
+                                flavor={session.flavor}
+                                clientId={session.clientId}
+                                editable
+                            />
+                            <View style={styles.storyOnlineDot} />
+                        </View>
+                        <Text style={styles.storyLabel} numberOfLines={1}>{session.name}</Text>
+                    </Pressable>
+                ))}
+            </ScrollView>
+        </View>
+    );
+}
 
 export function SessionsList({
     topContentInset = 0,
@@ -301,6 +452,17 @@ export function SessionsList({
         return result;
     }, [searchQuery, sourceData]);
 
+    const storySessions = React.useMemo(() => {
+        if (!data) return [];
+        const sessions: SessionRowData[] = [];
+        for (const item of data) {
+            if (item.type === 'session') sessions.push(item.session);
+            if (item.type === 'active-sessions') sessions.push(...item.sessions);
+            if (sessions.length >= 6) break;
+        }
+        return sessions;
+    }, [data]);
+
     // Early return if no data yet
     if (!data) {
         return (
@@ -394,10 +556,8 @@ export function SessionsList({
 
 
     const HeaderComponent = React.useCallback(() => {
-        return (
-            <UpdateBanner />
-        );
-    }, []);
+        return <MessengerDiscoveryHeader sessions={storySessions} />;
+    }, [storySessions]);
 
     // Footer removed - all sessions now shown inline
 
@@ -472,12 +632,6 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
         navigateToSession(session.id);
     }, [navigateToSession, session.id]);
 
-    const handleChangePicture = React.useCallback((event?: any) => {
-        event?.preventDefault?.();
-        event?.stopPropagation?.();
-        void pickAndSaveSessionProfilePicture(session.id);
-    }, [session.id]);
-
     const handleContextMenu = React.useCallback((event: any) => {
         event.preventDefault?.();
         event.stopPropagation?.();
@@ -517,7 +671,7 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                 <SessionProfilePictureAvatar
                     sessionId={session.id}
                     avatarId={session.avatarId}
-                    size={56}
+                    size={Platform.OS === 'web' ? 56 : 64}
                     monochrome={!status.isConnected}
                     flavor={session.flavor}
                     clientId={session.clientId}
@@ -578,21 +732,15 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                     </Text>
                 </View>
             </View>
+            {Platform.OS !== 'web' && (
+                <View style={styles.sessionMetaRight}>
+                    <Text style={[styles.sessionTime, session.hasUnread && styles.sessionTimeUnread]} numberOfLines={1}>
+                        {session.hasUnread ? 'Now' : formatLastSeen(session.activeAt!, true)}
+                    </Text>
+                    {session.hasUnread ? <View style={styles.unreadDot} /> : null}
+                </View>
+            )}
         </Pressable>
-        {Platform.OS !== 'web' && (
-            <Pressable
-                accessibilityLabel={`Change picture for ${session.name}`}
-                accessibilityRole="button"
-                hitSlop={8}
-                onPress={handleChangePicture}
-                style={({ pressed }) => [
-                    styles.pictureButton,
-                    pressed && { opacity: 0.72 },
-                ]}
-            >
-                <Ionicons name="camera" size={15} style={styles.pictureButtonIcon} />
-            </Pressable>
-        )}
         {Platform.OS === 'web' && (
             <SessionActionsPopover
                 anchor={actionsAnchor}

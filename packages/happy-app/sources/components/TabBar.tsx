@@ -107,37 +107,32 @@ const styles = StyleSheet.create((theme) => ({
         backgroundColor: theme.colors.text,
     },
     nativeSafeArea: {
-        paddingHorizontal: 18,
-        paddingTop: 8,
+        paddingHorizontal: 0,
+        paddingTop: 0,
+        backgroundColor: '#FFFFFF',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: '#E4E6EB',
     },
     nativeShadow: {
-        maxWidth: 320,
-        width: '68%',
+        maxWidth: layout.maxWidth,
+        width: '100%',
         alignSelf: 'center',
-        borderRadius: BAR_HEIGHT / 2,
-        shadowColor: theme.colors.glass.shadow,
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 1,
-        shadowRadius: 16,
-        elevation: 7,
+        borderRadius: 0,
+        shadowOpacity: 0,
+        elevation: 0,
     },
     nativeShell: {
         height: BAR_HEIGHT,
-        borderRadius: BAR_HEIGHT / 2,
+        borderRadius: 0,
         overflow: 'visible',
         position: 'relative',
     },
     nativeBaseSurface: {
         ...StyleSheet.absoluteFillObject,
-        borderRadius: BAR_HEIGHT / 2,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.glass.border,
+        borderRadius: 0,
+        borderWidth: 0,
         overflow: 'hidden',
-        backgroundColor: Platform.select({
-            ios: 'transparent',
-            android: theme.colors.glass.backgroundStrong,
-            default: theme.colors.glass.backgroundStrong,
-        }),
+        backgroundColor: '#FFFFFF',
     },
     nativeBaseShade: {
         ...StyleSheet.absoluteFillObject,
@@ -175,13 +170,13 @@ const styles = StyleSheet.create((theme) => ({
         justifyContent: 'center',
     },
     label: {
-        fontSize: 10,
-        lineHeight: 13,
+        fontSize: 12,
+        lineHeight: 15,
         marginTop: 2,
         ...Typography.default('semiBold'),
     },
     labelActive: {
-        color: theme.dark ? '#FFFFFF' : theme.colors.text,
+        color: '#0084FF',
         ...Typography.default('semiBold'),
     },
     labelInactive: {
@@ -201,30 +196,21 @@ const styles = StyleSheet.create((theme) => ({
         height: BAR_HEIGHT - (REST_INDICATOR_INSET * 2),
         zIndex: 1,
         borderRadius: (BAR_HEIGHT - (REST_INDICATOR_INSET * 2)) / 2,
-        backgroundColor: theme.dark ? 'rgba(255,255,255,0.105)' : theme.colors.glass.backgroundSubtle,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.dark ? 'rgba(255,255,255,0.10)' : theme.colors.glass.border,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
     },
     lensShadow: {
         flex: 1,
         borderRadius: LENS_HEIGHT / 2,
-        shadowColor: theme.colors.glass.shadow,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 1,
-        shadowRadius: 14,
-        elevation: 10,
+        shadowOpacity: 0,
+        elevation: 0,
     },
     lensSurface: {
         flex: 1,
-        borderRadius: LENS_HEIGHT / 2,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.dark ? 'rgba(255,255,255,0.32)' : theme.colors.glass.border,
+        borderRadius: 0,
+        borderWidth: 0,
         overflow: 'hidden',
-        backgroundColor: Platform.select({
-            ios: 'transparent',
-            android: theme.dark ? 'rgba(31,31,35,0.58)' : theme.colors.glass.backgroundStrong,
-            default: theme.colors.glass.backgroundStrong,
-        }),
+        backgroundColor: 'transparent',
     },
     badge: {
         position: 'absolute',
@@ -296,8 +282,12 @@ const NativeTabItem = React.memo(function NativeTabItem({
         onPress(index);
     }, [index, onPress]);
 
-    const activeTint = theme.dark ? '#FFFFFF' : theme.colors.text;
-    const inactiveTint = theme.dark ? 'rgba(255,255,255,0.62)' : theme.colors.textSecondary;
+    const activeTint = Platform.OS === 'web'
+        ? theme.dark ? '#FFFFFF' : theme.colors.text
+        : '#0084FF';
+    const inactiveTint = Platform.OS === 'web'
+        ? theme.dark ? 'rgba(255,255,255,0.62)' : theme.colors.textSecondary
+        : '#65676B';
     const inactiveIconAnimatedStyle = useAnimatedStyle(() => {
         const activation = Math.max(0, 1 - Math.abs(visualPosition.value - index));
         return { opacity: 1 - activation };
@@ -350,8 +340,9 @@ export const TabBar = React.memo(({ activeTab, onTabPress, inboxBadgeCount = 0 }
     const inboxHasContent = useInboxHasContent();
 
     const nativeTabs: TabDefinition[] = React.useMemo(() => [
-        { key: 'sessions', icon: require('@/assets/images/brutalist/Brutalism-15.png'), iconName: 'code-slash-outline', activeIconName: 'code-slash', label: t('tabs.sessions') },
-        { key: 'settings', icon: require('@/assets/images/brutalist/Brutalism-9.png'), iconName: 'settings-outline', activeIconName: 'settings', label: t('tabs.settings') },
+        { key: 'sessions', icon: require('@/assets/images/brutalist/Brutalism-15.png'), iconName: 'chatbubble-ellipses-outline', activeIconName: 'chatbubble-ellipses', label: 'Chats' },
+        { key: 'inbox', icon: require('@/assets/images/brutalist/Brutalism-27.png'), iconName: 'people-outline', activeIconName: 'people', label: 'People' },
+        { key: 'settings', icon: require('@/assets/images/brutalist/Brutalism-9.png'), iconName: 'albums-outline', activeIconName: 'albums', label: 'Stories' },
     ], []);
     const webTabs: TabDefinition[] = React.useMemo(() => [
         { key: 'inbox', icon: require('@/assets/images/brutalist/Brutalism-27.png'), iconName: 'mail-outline', activeIconName: 'mail', label: t('tabs.inbox') },

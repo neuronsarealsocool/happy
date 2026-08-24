@@ -263,18 +263,25 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                                 <Ionicons
                                     name={Platform.OS === 'ios' ? 'chevron-back' : 'arrow-back'}
                                     size={24}
-                                    color={theme.colors.header.tint}
+                                    color="#6C2CF6"
                                 />
                             </MobileGlassSurface>
                         </Pressable>
                     )}
                     {glassEnabled ? (
-                        <>
-                            <View pointerEvents="none" style={styles.mobileTitleSpacer} />
-                            <View pointerEvents="box-none" style={styles.mobileTitleOverlay}>
+                        leftSlot ? (
+                            <View style={styles.mobileContactTitleContainer}>
+                                <View style={styles.nativeLeftSlot}>{leftSlot}</View>
                                 {nativeTitle}
                             </View>
-                        </>
+                        ) : (
+                            <>
+                                <View pointerEvents="none" style={styles.mobileTitleSpacer} />
+                                <View pointerEvents="box-none" style={styles.mobileTitleOverlay}>
+                                    {nativeTitle}
+                                </View>
+                            </>
+                        )
                     ) : (
                         <View style={styles.titlePillContainer}>
                             {leftSlot ? (
@@ -362,21 +369,30 @@ const styles = StyleSheet.create((theme) => ({
     mobileTitleContainer: {
         width: '100%',
         flex: 0,
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
         paddingHorizontal: 8,
     },
     mobileTitleText: {
-        textAlign: 'center',
-        textShadowColor: theme.dark ? 'rgba(0, 0, 0, 0.30)' : 'rgba(255, 255, 255, 0.30)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 2,
+        textAlign: 'left',
+        fontSize: 18,
+        lineHeight: 22,
+        color: '#050505',
     },
     mobileSubtitleRow: {
         justifyContent: 'center',
     },
     mobileIdentityLine: {
-        textAlign: 'center',
+        textAlign: 'left',
+        fontSize: 14,
+        lineHeight: 18,
+    },
+    mobileContactTitleContainer: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        minWidth: 0,
+        marginLeft: -2,
     },
     webTitleRow: {
         flexDirection: 'row',
@@ -472,19 +488,10 @@ const styles = StyleSheet.create((theme) => ({
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
-        backgroundColor: Platform.select({
-            web: 'transparent',
-            ios: 'transparent',
-            android: theme.colors.glass.backgroundStrong,
-            default: 'transparent',
-        }),
-        borderWidth: Platform.select({ web: 0, default: StyleSheet.hairlineWidth }),
-        borderColor: theme.colors.glass.border,
-        shadowColor: theme.colors.glass.shadow,
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: Platform.select({ web: 0, default: 1 }),
-        shadowRadius: 18,
-        elevation: Platform.select({ android: 8, default: 0 }),
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        shadowOpacity: 0,
+        elevation: 0,
         zIndex: 1,
     },
     rightSlot: {

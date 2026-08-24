@@ -42,12 +42,13 @@ const stylesheet = StyleSheet.create((theme, runtime) => ({
     },
     titleContainer: {
         flex: 1,
-        alignItems: 'center',
+        alignItems: Platform.OS === 'web' ? 'center' : 'flex-start',
     },
     titleText: {
-        fontSize: 17,
-        color: theme.colors.header.tint,
-        fontWeight: '600',
+        fontSize: Platform.OS === 'web' ? 17 : 31,
+        lineHeight: Platform.OS === 'web' ? 22 : 36,
+        color: Platform.OS === 'web' ? theme.colors.header.tint : '#050505',
+        fontWeight: Platform.OS === 'web' ? '600' : '800',
         ...Typography.default('semiBold'),
     },
     subtitleText: {
@@ -143,7 +144,11 @@ function HeaderRight() {
                 shortcutHintsVisible && styles.headerButtonShortcutActive,
             ]}
         >
-            <Ionicons name="add-outline" size={28} color={theme.colors.header.tint} />
+            <Ionicons
+                name={Platform.OS === 'web' ? 'add-outline' : 'create-outline'}
+                size={Platform.OS === 'web' ? 28 : 32}
+                color={Platform.OS === 'web' ? theme.colors.header.tint : '#0084FF'}
+            />
             <ShortcutHintBadge shortcutKey="N" style={styles.headerShortcutBadge} />
         </Pressable>
     );
@@ -171,12 +176,16 @@ function HeaderLeft() {
     const { theme } = useUnistyles();
     return (
         <View style={styles.logoContainer}>
-            <Image
-                source={require('@/assets/images/logo-black.png')}
-                contentFit="contain"
-                style={[{ width: 24, height: 24 }]}
-                tintColor={theme.colors.header.tint}
-            />
+            {Platform.OS === 'web' ? (
+                <Image
+                    source={require('@/assets/images/logo-black.png')}
+                    contentFit="contain"
+                    style={[{ width: 24, height: 24 }]}
+                    tintColor={theme.colors.header.tint}
+                />
+            ) : (
+                <Ionicons name="menu" size={32} color="#0084FF" />
+            )}
         </View>
     );
 }
@@ -230,18 +239,19 @@ function HeaderTitleWithSubtitle({ subtitle }: { subtitle?: string }) {
     const hasCustomSubtitle = !!subtitle;
     const connectionStatus = getConnectionStatus();
     const showConnectionStatus = !hasCustomSubtitle && connectionStatus.text;
+    const showNativeMessengerTitle = Platform.OS !== 'web' && !subtitle;
 
     return (
         <View style={styles.titleContainer}>
             <Text style={styles.titleText}>
-                {t('sidebar.sessionsTitle')}
+                {showNativeMessengerTitle ? 'messenger' : t('sidebar.sessionsTitle')}
             </Text>
-            {hasCustomSubtitle && (
+            {hasCustomSubtitle && !showNativeMessengerTitle && (
                 <Text style={styles.subtitleText}>
                     {subtitle}
                 </Text>
             )}
-            {showConnectionStatus && (
+            {showConnectionStatus && !showNativeMessengerTitle && (
                 <View style={styles.statusContainer}>
                     <StatusDot
                         color={connectionStatus.color}

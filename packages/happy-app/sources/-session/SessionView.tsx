@@ -410,7 +410,7 @@ export const SessionView = React.memo((props: { id: string }) => {
         <SessionProfilePictureAvatar
             sessionId={sessionId}
             avatarId={getSessionAvatarId(session)}
-            size={Platform.OS === 'web' ? 32 : 28}
+            size={Platform.OS === 'web' ? 32 : (deviceType === 'phone' ? 44 : 28)}
             monochrome={!headerProps.isConnected}
             flavor={session.metadata?.flavor}
             clientId={session.metadata?.client?.id}
@@ -419,7 +419,11 @@ export const SessionView = React.memo((props: { id: string }) => {
     ) : null;
     const headerRight = session && deviceType === 'phone' && Platform.OS !== 'web'
         ? (
-            headerAvatar
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                <Ionicons name="call" size={25} color="#6C2CF6" />
+                <Ionicons name="videocam" size={27} color="#6C2CF6" />
+                <Ionicons name="information-circle" size={29} color="#6C2CF6" />
+            </View>
         )
         : null;
 
@@ -494,9 +498,11 @@ export const SessionView = React.memo((props: { id: string }) => {
                         folderName={headerProps.folderName}
                         isConnected={headerProps.isConnected}
                         backdropVisible={headerBackdropVisible}
-                        identityLine={headerProps.identityLine}
+                        identityLine={Platform.OS !== 'web' && deviceType === 'phone'
+                            ? (headerProps.isConnected ? 'Active now' : 'Last seen recently')
+                            : headerProps.identityLine}
                         extraPathSegment={fileViewPath ?? undefined}
-                        leftSlot={Platform.OS === 'web' ? headerAvatar : (deviceType === 'phone' ? null : headerAvatar)}
+                        leftSlot={Platform.OS === 'web' ? headerAvatar : headerAvatar}
                         rightSlot={(diffViewOpen || !!fileViewPath) ? headerRightSlot : headerRight}
                         onTitlePress={session ? () => router.push(`/session/${sessionId}/info`) : undefined}
                         onBackPress={() => router.back()}
