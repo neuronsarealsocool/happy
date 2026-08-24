@@ -117,9 +117,10 @@ const styles = StyleSheet.create((theme) => ({
         justifyContent: Platform.OS === 'web' ? 'flex-start' : 'center',
     },
     titleText: {
-        fontSize: Platform.OS === 'web' ? 17 : 16,
-        color: theme.colors.header.tint,
-        fontWeight: '600',
+        fontSize: Platform.OS === 'web' ? 17 : 31,
+        lineHeight: Platform.OS === 'web' ? 22 : 36,
+        color: Platform.OS === 'web' ? theme.colors.header.tint : '#050505',
+        fontWeight: Platform.OS === 'web' ? '600' : '800',
         ...Typography.default('semiBold'),
     },
     statusContainer: {
@@ -155,8 +156,8 @@ const styles = StyleSheet.create((theme) => ({
         width: 36,
         height: 36,
         marginHorizontal: 4,
-        borderRadius: 12,
-        backgroundColor: theme.colors.surfaceSelected,
+        borderRadius: 18,
+        backgroundColor: '#E7F3FF',
     },
     headerSearch: {
         width: '100%',
@@ -231,9 +232,9 @@ const HeaderTitle = React.memo(({ activeTab }: { activeTab: ActiveTabType }) => 
     return (
         <View style={styles.titleContainer}>
             <Text style={styles.titleText}>
-                {t(TAB_TITLES[activeTab])}
+                {Platform.OS !== 'web' && activeTab === 'sessions' ? 'messenger' : t(TAB_TITLES[activeTab])}
             </Text>
-            {connectionStatus.text && (
+            {connectionStatus.text && Platform.OS === 'web' && (
                 <View style={styles.statusContainer}>
                     <StatusDot
                         color={connectionStatus.color}
@@ -309,11 +310,11 @@ const HeaderRight = React.memo(({
                     >
                         <Ionicons
                             name={searchActive ? 'close' : 'search'}
-                            size={searchActive ? 24 : 21}
-                            color={theme.colors.header.tint}
+                            size={searchActive ? 28 : 30}
+                            color="#0084FF"
                         />
                     </Pressable>
-                    {hasArchivedSessions && !searchActive && (
+                    {hasArchivedSessions && !searchActive && false && (
                         <Pressable
                             onPress={onArchiveVisibilityPress}
                             accessibilityLabel={hideArchivedSessions
@@ -334,12 +335,12 @@ const HeaderRight = React.memo(({
                         </Pressable>
                     )}
                     <Pressable
-                        onPress={() => router.push('/settings')}
-                        accessibilityLabel={t('settings.title')}
+                        onPress={() => router.navigate('/new')}
+                        accessibilityLabel="New chat"
                         accessibilityRole="button"
                         style={styles.headerActionButton}
                     >
-                        <Ionicons name="settings-outline" size={21} color={theme.colors.header.tint} />
+                        <Ionicons name="create-outline" size={32} color="#0084FF" />
                     </Pressable>
                 </View>
             );
@@ -441,7 +442,7 @@ export const MainView = React.memo(({ variant }: MainViewProps) => {
             + 12;
     const bottomContentInset = Platform.OS === 'web'
         ? 0
-        : searchActive ? 16 : MOBILE_HOME_DOCK_CONTENT_INSET;
+        : searchActive ? 16 : 92;
 
     const handleHomePromptSubmit = React.useCallback(async (): Promise<boolean> => {
         const prompt = homePrompt.trim();
@@ -557,7 +558,13 @@ export const MainView = React.memo(({ variant }: MainViewProps) => {
                         onArchiveVisibilityPress={handleArchiveVisibilityPress}
                     />
                 ) : undefined}
-                headerLeft={() => <HeaderLogo />}
+                headerLeft={() => Platform.OS !== 'web' && activeTab === 'sessions'
+                    ? (
+                        <View style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="menu" size={32} color="#0084FF" />
+                        </View>
+                    )
+                    : <HeaderLogo />}
                 headerLeftGlass={Platform.OS !== 'web'}
                 headerBackdropVisible={headerBackdropVisible}
                 headerBackdropAlwaysVisible={Platform.OS !== 'web'}
@@ -595,17 +602,15 @@ export const MainView = React.memo(({ variant }: MainViewProps) => {
                     inboxBadgeCount={friendRequests.length}
                 />
             ) : (
-                <View pointerEvents="box-none" style={styles.phoneBottomDockOverlay}>
-                    {!searchActive && (
-                        <HomeDock
-                            prompt={homePrompt}
-                            onPromptChange={setHomePrompt}
-                            onSubmit={handleHomePromptSubmit}
-                            isSubmitting={isStartingHomeSession}
-                            showBottomBackdrop={sessionListViewData !== null && sessionListViewData.length > 0}
+                !searchActive && (
+                    <View pointerEvents="box-none" style={styles.phoneBottomDockOverlay}>
+                        <TabBar
+                            activeTab={activeTab}
+                            onTabPress={handleTabPress}
+                            inboxBadgeCount={friendRequests.length}
                         />
-                    )}
-                </View>
+                    </View>
+                )
             )}
         </View>
     );

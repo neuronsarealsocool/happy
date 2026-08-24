@@ -90,6 +90,10 @@ const SectionHeader = React.memo(({ session, displayPath }: { session: SessionRo
 
     const [isHovered, setIsHovered] = React.useState(false);
 
+    if (Platform.OS !== 'web') {
+        return null;
+    }
+
     return (
         <View
             style={hasBranch ? styles.sectionHeader : styles.sectionHeaderSingleLine}
@@ -158,6 +162,10 @@ const MachineSeparator = React.memo(({ machineName, machineId }: { machineName: 
     const handlePress = React.useCallback(() => {
         router.navigate(`/machine/${machineId}` as any);
     }, [router, machineId]);
+
+    if (Platform.OS !== 'web') {
+        return null;
+    }
 
     return (
         <Pressable onPress={handlePress} style={styles.machineSeparator} hitSlop={{ top: 8, bottom: 8 }}>
@@ -313,7 +321,7 @@ export const CompactSessionRow = React.memo(({ session, selected, showBorder }: 
                         <SessionProfilePictureAvatar
                             sessionId={session.id}
                             avatarId={session.avatarId}
-                            size={34}
+                            size={Platform.OS === 'web' ? 34 : 64}
                             monochrome={!status.isConnected}
                             flavor={session.flavor}
                             clientId={session.clientId}
@@ -479,11 +487,11 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     // Project card styles
     projectCard: {
-        backgroundColor: theme.colors.surface,
-        marginBottom: 8,
-        marginHorizontal: Platform.select({ ios: 16, default: 12 }),
-        borderRadius: Platform.select({ web: 16, default: 18 }),
-        borderWidth: Platform.select({ web: 0, default: StyleSheet.hairlineWidth }),
+        backgroundColor: Platform.OS === 'web' ? theme.colors.surface : '#FFFFFF',
+        marginBottom: Platform.OS === 'web' ? 8 : 0,
+        marginHorizontal: Platform.select({ web: 12, default: 0 }),
+        borderRadius: Platform.select({ web: 16, default: 0 }),
+        borderWidth: 0,
         borderColor: theme.colors.divider,
         overflow: 'hidden',
         shadowColor: Platform.select({ web: theme.colors.shadow.color, default: 'transparent' }),
@@ -494,10 +502,10 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     // Session row styles
     sessionRow: {
-        height: 64,
+        height: Platform.OS === 'web' ? 64 : 92,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
+        paddingHorizontal: Platform.OS === 'web' ? 16 : 22,
         backgroundColor: 'transparent',
     },
     sessionRowWithBorder: {
@@ -517,9 +525,10 @@ const stylesheet = StyleSheet.create((theme) => ({
         alignItems: 'center',
     },
     sessionTitle: {
-        fontSize: 15,
+        fontSize: Platform.OS === 'web' ? 15 : 20,
+        fontWeight: Platform.OS === 'web' ? '400' : '700',
         flex: 1,
-        ...Typography.default('regular'),
+        ...Typography.default(Platform.OS === 'web' ? 'regular' : 'semiBold'),
     },
     sessionShortcutBadge: {
         flexShrink: 0,
@@ -532,13 +541,13 @@ const stylesheet = StyleSheet.create((theme) => ({
         color: theme.colors.textSecondary,
     },
     sessionIdentity: {
-        fontSize: 11,
+        fontSize: Platform.OS === 'web' ? 11 : 17,
         color: theme.colors.textSecondary,
         ...Typography.default('regular'),
         flexShrink: 1,
     },
     sessionIdentityRow: {
-        marginLeft: 46,
+        marginLeft: Platform.OS === 'web' ? 46 : 82,
         marginTop: 2,
         flexDirection: 'row',
         alignItems: 'center',
@@ -553,19 +562,19 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     compactAvatarContainer: {
         position: 'relative',
-        width: 38,
-        height: 38,
-        marginRight: 8,
+        width: Platform.OS === 'web' ? 38 : 66,
+        height: Platform.OS === 'web' ? 38 : 66,
+        marginRight: Platform.OS === 'web' ? 8 : 16,
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
     },
     compactAvatarStatus: {
         position: 'absolute',
-        right: -3,
-        bottom: -3,
-        width: 18,
-        height: 18,
+        right: Platform.OS === 'web' ? -3 : 0,
+        bottom: Platform.OS === 'web' ? -3 : 2,
+        width: Platform.OS === 'web' ? 18 : 18,
+        height: Platform.OS === 'web' ? 18 : 18,
         borderRadius: 9,
         alignItems: 'center',
         justifyContent: 'center',

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Pressable } from 'react-native';
+import { Platform, View, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { Text } from '@/components/StyledText';
@@ -38,29 +38,31 @@ export const ProjectGroup = React.memo(({ project, selectedSessionId }: ProjectG
 
     return (
         <View style={styles.container}>
-            <Pressable style={styles.header} onPress={toggleCollapsed} hitSlop={8}>
-                <Ionicons
-                    name={collapsed ? 'chevron-forward' : 'chevron-down'}
-                    size={16}
-                    color={theme.colors.textSecondary}
-                    style={styles.chevron}
-                />
-                <View style={styles.headerText}>
-                    <Text style={styles.title} numberOfLines={1}>
-                        {project.name}
-                    </Text>
-                    {machineName && (
-                        <Text style={styles.subtitle} numberOfLines={1}>
-                            {machineName}
+            {Platform.OS === 'web' && (
+                <Pressable style={styles.header} onPress={toggleCollapsed} hitSlop={8}>
+                    <Ionicons
+                        name={collapsed ? 'chevron-forward' : 'chevron-down'}
+                        size={16}
+                        color={theme.colors.textSecondary}
+                        style={styles.chevron}
+                    />
+                    <View style={styles.headerText}>
+                        <Text style={styles.title} numberOfLines={1}>
+                            {project.name}
                         </Text>
-                    )}
-                </View>
-                <Text style={styles.count}>
-                    {project.activeCount > 0 ? `${project.activeCount}/${project.sessionCount}` : project.sessionCount}
-                </Text>
-            </Pressable>
+                        {machineName && (
+                            <Text style={styles.subtitle} numberOfLines={1}>
+                                {machineName}
+                            </Text>
+                        )}
+                    </View>
+                    <Text style={styles.count}>
+                        {project.activeCount > 0 ? `${project.activeCount}/${project.sessionCount}` : project.sessionCount}
+                    </Text>
+                </Pressable>
+            )}
 
-            {!collapsed && project.workspaces.map(workspace => (
+            {(Platform.OS !== 'web' || !collapsed) && project.workspaces.map(workspace => (
                 <WorkspaceSection
                     key={workspace.id || 'primary'}
                     workspace={workspace}
@@ -108,10 +110,10 @@ const WorkspaceSection = React.memo(({ workspace, showLabel, selectedSessionId }
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
-        backgroundColor: theme.colors.surface,
-        marginHorizontal: 8,
-        marginBottom: 8,
-        borderRadius: 12,
+        backgroundColor: Platform.OS === 'web' ? theme.colors.surface : '#FFFFFF',
+        marginHorizontal: Platform.OS === 'web' ? 8 : 0,
+        marginBottom: Platform.OS === 'web' ? 8 : 0,
+        borderRadius: Platform.OS === 'web' ? 12 : 0,
         overflow: 'hidden',
     },
     header: {
@@ -145,7 +147,7 @@ const stylesheet = StyleSheet.create((theme) => ({
         ...Typography.default(),
     },
     workspace: {
-        paddingLeft: 10,
+        paddingLeft: Platform.OS === 'web' ? 10 : 0,
     },
     workspaceHeader: {
         flexDirection: 'row',
