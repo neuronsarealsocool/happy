@@ -4,8 +4,8 @@ apply plugin: "com.facebook.react"
 
 def appRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getParentFile().getParentFile().getAbsolutePath()
-def useLocalEmbeddedBundle = System.getenv("HAPPY_LOCAL_EMBEDDED_BUNDLE") == "1"
-def expoUpdatesEnabled = System.getenv("HAPPY_DISABLE_UPDATES") == "1" ? "false" : "true"
+def useLocalEmbeddedBundle = System.getenv("HAPPY_LOCAL_EMBEDDED_BUNDLE") == "1" || System.getenv("HAPPY_ENABLE_UPDATES") != "1"
+def expoUpdatesEnabled = System.getenv("HAPPY_ENABLE_UPDATES") == "1" ? "true" : "false"
 def expoRuntimeVersion = useLocalEmbeddedBundle ? "21-local" : "21"
 def expoUpdatesRequestHeaders = useLocalEmbeddedBundle
         ? '{"expo-channel-name":"local"}'
