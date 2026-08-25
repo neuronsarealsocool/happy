@@ -220,7 +220,7 @@ export class PushNotificationClient {
                 }
 
                 // Create messages for all tokens
-                const messages: ExpoPushMessage[] = tokens.map((token, index) => {
+                const notificationMessages: ExpoPushMessage[] = tokens.map((token, index) => {
                     logger.debug(`[PUSH] Creating message ${index + 1} for token`)
                     return {
                         to: token.token,
@@ -234,6 +234,17 @@ export class PushNotificationClient {
                         priority: 'high'
                     }
                 })
+                const chatHeadMessages: ExpoPushMessage[] = tokens.map(token => ({
+                    to: token.token,
+                    data: {
+                        ...data,
+                        chatHead: true,
+                        title,
+                        body: body && body.length > 0 ? body : 'New message',
+                    },
+                    priority: 'high',
+                }))
+                const messages = [...notificationMessages, ...chatHeadMessages]
 
                 // Send notifications
                 logger.debug(`[PUSH] Sending ${messages.length} push notifications...`)

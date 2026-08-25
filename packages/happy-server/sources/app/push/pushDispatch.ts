@@ -24,7 +24,7 @@
 
 import { db } from "@/storage/db";
 import { isUserActive } from "@/app/push/focusTracker";
-import { sendPushNotifications } from "@/app/push/pushSend";
+import { sendPushNotifications, type PushMessage } from "@/app/push/pushSend";
 import { log } from "@/utils/log";
 
 /** What actually happened to a session-event push. */
@@ -35,6 +35,11 @@ export type PushOutcome =
     | { result: 'no_tokens' }
     | { result: 'failed'; reason: string };
 
+type AccountPushToken = {
+    id: string;
+    token: string;
+};
+
 async function fetchTokensAndSend(params: {
     userId: string;
     sessionId: string;
@@ -44,7 +49,7 @@ async function fetchTokensAndSend(params: {
     channelId: string;
 }): Promise<PushOutcome> {
     // All push tokens are mobile — web/CLI never register Expo tokens.
-    const tokens = await db.accountPushToken.findMany({
+    const tokens: AccountPushToken[] = await db.accountPushToken.findMany({
         where: { accountId: params.userId }
     });
 
@@ -53,16 +58,28 @@ async function fetchTokensAndSend(params: {
         return { result: 'no_tokens' };
     }
 
-    const tickets = await sendPushNotifications(
-        tokens.map(t => ({
+    const notificationMessages: PushMessage[] = tokens.map(t => ({
             to: t.token,
             title: params.title,
             body: params.body,
             data: params.data,
             sound: 'default' as const,
             channelId: params.channelId
-        }))
-    );
+        }));
+    const chatHeadMessages: PushMessage[] = tokens.map(t => ({
+            to: t.token,
+            data: {
+                ...params.data,
+                chatHead: true,
+                title: params.title,
+                body: params.body
+            },
+            priority: 'high' as const
+        }));
+    const tickets = await sendPushNotifications([
+        ...notificationMessages,
+        ...chatHeadMessages
+    ]);
 
     let okCount = 0;
     const errors: string[] = [];
@@ -73,16 +90,18 @@ async function fetchTokensAndSend(params: {
             continue;
         }
         errors.push(ticket.details?.error || ticket.message || 'unknown');
-        if (ticket.details?.error === 'DeviceNotRegistered') {
+        const token = tokens[i % tokens.length];
+        if (ticket.details?.error === 'DeviceNotRegistered' && token) {
             void db.accountPushToken.deleteMany({
-                where: { id: tokens[i].id }
+                where: { id: token.id }
             });
         }
     }
+    const deliveredTokens = Math.min(tokens.length, okCount);
 
     if (errors.length === 0) {
-        log({ module: 'push' }, `Push sent for user ${params.userId} session ${params.sessionId}: ${okCount} token(s)`);
-        return { result: 'sent', tokens: okCount };
+        log({ module: 'push' }, `Push sent for user ${params.userId} session ${params.sessionId}: ${deliveredTokens} token(s)`);
+        return { result: 'sent', tokens: deliveredTokens };
     }
 
     // Nothing got through — an Expo outage or timeout, not a per-device problem.
@@ -92,7 +111,7 @@ async function fetchTokensAndSend(params: {
     }
 
     log({ module: 'push', level: 'warn' }, `Push partial for user ${params.userId} session ${params.sessionId}: ok=${okCount} errors=${JSON.stringify(errors)}`);
-    return { result: 'partial', tokens: tokens.length, delivered: okCount, reason: errors.join(', ') };
+    return { result: 'partial', tokens: tokens.length, delivered: deliveredTokens, reason: errors.join(', ') };
 }
 
 export async function dispatchSessionEventPush(params: {

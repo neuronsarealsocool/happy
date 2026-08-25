@@ -32,6 +32,13 @@ import {
     syncCurrentPushToken,
     type PushPermissionInfo,
 } from '@/sync/pushRegistration';
+import {
+    canUseAndroidNotificationAccess,
+    canUseAndroidChatHeads,
+    openAndroidChatHeadSettings,
+    openAndroidNotificationAccessSettings,
+    showAndroidChatHeadPreview,
+} from '@/utils/androidChatHeads';
 
 function formatPushPermissionLabel(permission: PushPermissionInfo | null): string {
     if (!permission) {
@@ -116,6 +123,8 @@ export default React.memo(() => {
     const [requestingPushPermission, setRequestingPushPermission] = useState(false);
     const [refreshingPushToken, setRefreshingPushToken] = useState(false);
     const [deletingPushToken, setDeletingPushToken] = useState<string | null>(null);
+    const [chatHeadsAllowed, setChatHeadsAllowed] = useState<boolean | null>(null);
+    const [notificationAccessAllowed, setNotificationAccessAllowed] = useState<boolean | null>(null);
 
     // Get the current secret key
     const currentSecret = auth.credentials?.secret || '';
@@ -153,14 +162,30 @@ export default React.memo(() => {
         }
     }, [auth.credentials]);
 
+    const loadChatHeadSettings = useCallback(async () => {
+        if (Platform.OS !== 'android') {
+            setChatHeadsAllowed(false);
+            setNotificationAccessAllowed(false);
+            return;
+        }
+        const [canDraw, canReadNotifications] = await Promise.all([
+            canUseAndroidChatHeads(),
+            canUseAndroidNotificationAccess(),
+        ]);
+        setChatHeadsAllowed(canDraw);
+        setNotificationAccessAllowed(canReadNotifications);
+    }, []);
+
     useEffect(() => {
         void loadPushSettings();
-    }, [loadPushSettings]);
+        void loadChatHeadSettings();
+    }, [loadPushSettings, loadChatHeadSettings]);
 
     useFocusEffect(
         useCallback(() => {
             void loadPushSettings();
-        }, [loadPushSettings])
+            void loadChatHeadSettings();
+        }, [loadPushSettings, loadChatHeadSettings])
     );
 
     // GitHub disconnection
@@ -307,6 +332,25 @@ export default React.memo(() => {
             setDeletingPushToken(null);
         }
     }, [auth.credentials, loadPushSettings]);
+
+    const handleOpenChatHeadSettings = useCallback(() => {
+        openAndroidChatHeadSettings();
+    }, []);
+
+    const handleOpenNotificationAccessSettings = useCallback(() => {
+        openAndroidNotificationAccessSettings();
+    }, []);
+
+    const handlePreviewChatHead = useCallback(async () => {
+        const allowed = await canUseAndroidChatHeads();
+        setChatHeadsAllowed(allowed);
+        if (!allowed) {
+            Modal.alert('Enable Chat Heads', 'Android needs “Display over other apps” permission before Happy can show chat heads.');
+            openAndroidChatHeadSettings();
+            return;
+        }
+        showAndroidChatHeadPreview();
+    }, []);
 
     return (
         <>
@@ -539,6 +583,41 @@ export default React.memo(() => {
                         showChevron={false}
                     />
                 </ItemGroup>
+
+                {Platform.OS === 'android' && (
+                    <ItemGroup
+                        title="Chat Heads"
+                        footer="Chat heads appear over other apps when Happy receives a notification. Android controls this with the special “Display over other apps” permission."
+                    >
+                        <Item
+                            title="Display Over Other Apps"
+                            detail={chatHeadsAllowed === null ? 'Checking' : chatHeadsAllowed ? 'Allowed' : 'Needs permission'}
+                            subtitle={chatHeadsAllowed
+                                ? 'Happy can show Messenger-style chat heads.'
+                                : 'Open Android settings and allow Happy to display over other apps.'}
+                            icon={<Ionicons name="chatbubble-ellipses-outline" size={29} color="#007AFF" />}
+                            onPress={handleOpenChatHeadSettings}
+                            showChevron={false}
+                        />
+                        <Item
+                            title="Notification Access"
+                            detail={notificationAccessAllowed === null ? 'Checking' : notificationAccessAllowed ? 'Allowed' : 'Needs permission'}
+                            subtitle={notificationAccessAllowed
+                                ? 'Happy can show chat heads from posted notifications.'
+                                : 'Allow Happy notification access so normal push notifications can become chat heads.'}
+                            icon={<Ionicons name="notifications-circle-outline" size={29} color="#5856D6" />}
+                            onPress={handleOpenNotificationAccessSettings}
+                            showChevron={false}
+                        />
+                        <Item
+                            title="Preview Chat Head"
+                            subtitle="Shows a test chat head over the current screen."
+                            icon={<Ionicons name="scan-circle-outline" size={29} color="#34C759" />}
+                            onPress={handlePreviewChatHead}
+                            showChevron={false}
+                        />
+                    </ItemGroup>
+                )}
 
                 <ItemGroup
                     title={`Registered Tokens (${pushTokens.length})`}
