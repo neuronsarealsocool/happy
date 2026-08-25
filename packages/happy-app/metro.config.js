@@ -36,7 +36,20 @@ const baseResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName.startsWith('@/')) {
     const sourcePath = path.join(__dirname, 'sources', moduleName.slice(2));
+    const platformCandidates = platform
+      ? [
+          `${sourcePath}.${platform}.ts`,
+          `${sourcePath}.${platform}.tsx`,
+          `${sourcePath}.${platform}.js`,
+          `${sourcePath}.${platform}.jsx`,
+          path.join(sourcePath, `index.${platform}.ts`),
+          path.join(sourcePath, `index.${platform}.tsx`),
+          path.join(sourcePath, `index.${platform}.js`),
+          path.join(sourcePath, `index.${platform}.jsx`),
+        ]
+      : [];
     const candidates = [
+      ...platformCandidates,
       sourcePath,
       `${sourcePath}.ts`,
       `${sourcePath}.tsx`,
