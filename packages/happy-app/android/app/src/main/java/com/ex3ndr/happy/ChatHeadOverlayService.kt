@@ -206,17 +206,11 @@ class ChatHeadOverlayService : Service() {
         val closeButton = iconButton("X") { dismiss() }
         header.addView(closeButton, LinearLayout.LayoutParams(dp(46), dp(46)))
 
-        val message = TextView(this).apply {
-            text = body
-            setTextColor(Color.BLACK)
-            textSize = 18f
-            background = roundedDrawable(Color.rgb(239, 240, 244), dp(22).toFloat())
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-            maxLines = 4
+        val messagesColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
         }
-        val messageParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        messageParams.setMargins(dp(64), dp(18), dp(8), dp(12))
-        card.addView(message, messageParams)
+        card.addView(messagesColumn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        appendMessageBubble(messagesColumn, body, outgoing = false)
 
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -245,7 +239,11 @@ class ChatHeadOverlayService : Service() {
         val sendReply = {
             val reply = replyInput.text?.toString()?.trim().orEmpty()
             if (reply.isNotEmpty()) {
-                openHappy(sessionId, reply, true)
+                appendMessageBubble(messagesColumn, reply, outgoing = true)
+                replyInput.text?.clear()
+                if (sessionId.isNotBlank()) {
+                    openHappy(sessionId, reply, true, dismissOverlay = false)
+                }
             }
         }
         replyInput.setOnEditorActionListener { _, actionId, _ ->
@@ -294,6 +292,28 @@ class ChatHeadOverlayService : Service() {
         return root
     }
 
+    private fun appendMessageBubble(container: LinearLayout, textValue: String, outgoing: Boolean) {
+        val message = TextView(this).apply {
+            text = textValue
+            setTextColor(if (outgoing) Color.WHITE else Color.BLACK)
+            textSize = 18f
+            background = roundedDrawable(
+                if (outgoing) ContextCompat.getColor(context, android.R.color.holo_blue_light) else Color.rgb(239, 240, 244),
+                dp(22).toFloat()
+            )
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            maxLines = 8
+        }
+        val messageParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        messageParams.gravity = if (outgoing) Gravity.END else Gravity.START
+        if (outgoing) {
+            messageParams.setMargins(dp(64), dp(8), dp(8), dp(8))
+        } else {
+            messageParams.setMargins(dp(64), dp(18), dp(8), dp(12))
+        }
+        container.addView(message, messageParams)
+    }
+
     private fun installDrag(view: View) {
         var startX = 0
         var startY = 0
@@ -329,27 +349,33 @@ class ChatHeadOverlayService : Service() {
         }
     }
 
-    private fun openHappy(sessionId: String, draft: String = "", send: Boolean = false) {
-        val uri = Uri.Builder()
-            .scheme("happy")
-            .authority("session")
-            .apply {
-                if (sessionId.isNotBlank()) {
-                    appendPath(sessionId)
-                }
-                if (draft.isNotBlank()) {
-                    appendQueryParameter("chatHeadDraft", draft)
-                    appendQueryParameter("chatHeadSend", if (send) "1" else "0")
-                }
-            }
-            .build()
+    private fun openHappy(sessionId: String, draft: String = "", send: Boolean = false, dismissOverlay: Boolean = true) {
+        val uri = buildHappySessionUri(sessionId, draft, send)
         val intent = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             data = uri
         }
         startActivity(intent)
-        dismiss()
+        if (dismissOverlay) {
+            dismiss()
+        }
+    }
+
+    private fun buildHappySessionUri(sessionId: String, draft: String = "", send: Boolean = false): Uri {
+        if (sessionId.isBlank()) {
+            return Uri.parse("happy:///")
+        }
+
+        val uri = StringBuilder("happy:///session/")
+            .append(Uri.encode(sessionId))
+        if (draft.isNotBlank()) {
+            uri.append("?chatHeadDraft=")
+                .append(Uri.encode(draft))
+                .append("&chatHeadSend=")
+                .append(if (send) "1" else "0")
+        }
+        return Uri.parse(uri.toString())
     }
 
     private fun dismiss() {
