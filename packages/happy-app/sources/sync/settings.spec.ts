@@ -191,6 +191,7 @@ describe('settings', () => {
                 avatarStyle: 'brutalist',
                 showFlavorIcons: false,
                 userMessageBubbleColor: 'blue',
+                sessionProfilePictures: {},
                 sessionStatusBarDisplay: 'hidden',
                 usageLimitShowRemaining: false,
                 hideInactiveSessions: false,
@@ -246,6 +247,19 @@ describe('settings', () => {
             expect(settingsToSyncPayload(settings)).toMatchObject({
                 agentDefaultOverrides: {
                     codex: { modelMode: 'gpt-5.4' },
+                },
+            });
+        });
+
+        it('keeps synced session profile pictures', () => {
+            expect(settingsToSyncPayload({
+                ...settingsDefaults,
+                sessionProfilePictures: {
+                    'session-1': 'data:image/jpeg;base64,abc123',
+                },
+            })).toMatchObject({
+                sessionProfilePictures: {
+                    'session-1': 'data:image/jpeg;base64,abc123',
                 },
             });
         });

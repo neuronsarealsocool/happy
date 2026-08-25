@@ -1,34 +1,67 @@
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat, type Action } from 'expo-image-manipulator';
 import { Modal } from '@/modal';
-import { storage, useLocalSetting } from '@/sync/storage';
+import { storage, useLocalSetting, useSetting } from '@/sync/storage';
+import { sync } from '@/sync/sync';
 
 const PROFILE_PICTURE_SIZE = 256;
 const PROFILE_PICTURE_QUALITY = 0.86;
 
 export function useSessionProfilePicture(sessionId: string): string | null {
-    const pictures = useLocalSetting('sessionProfilePictures');
-    return pictures[sessionId] ?? null;
+    const syncedPictures = useSetting('sessionProfilePictures');
+    const legacyLocalPictures = useLocalSetting('sessionProfilePictures');
+    return syncedPictures[sessionId] ?? legacyLocalPictures[sessionId] ?? null;
 }
 
 export function setSessionProfilePicture(sessionId: string, imageUrl: string) {
-    const pictures = storage.getState().localSettings.sessionProfilePictures;
-    storage.getState().applyLocalSettings({
+    const pictures = storage.getState().settings.sessionProfilePictures;
+    sync.applySettings({
         sessionProfilePictures: {
             ...pictures,
             [sessionId]: imageUrl,
         },
     });
+
+    const legacyLocalPictures = storage.getState().localSettings.sessionProfilePictures;
+    if (legacyLocalPictures[sessionId]) {
+        const next = { ...legacyLocalPictures };
+        delete next[sessionId];
+        storage.getState().applyLocalSettings({ sessionProfilePictures: next });
+    }
 }
 
 export function clearSessionProfilePicture(sessionId: string) {
-    const pictures = storage.getState().localSettings.sessionProfilePictures;
-    if (!pictures[sessionId]) {
+    const pictures = storage.getState().settings.sessionProfilePictures;
+    const legacyLocalPictures = storage.getState().localSettings.sessionProfilePictures;
+    if (!pictures[sessionId] && !legacyLocalPictures[sessionId]) {
         return;
     }
-    const next = { ...pictures };
-    delete next[sessionId];
-    storage.getState().applyLocalSettings({ sessionProfilePictures: next });
+    if (pictures[sessionId]) {
+        const next = { ...pictures };
+        delete next[sessionId];
+        sync.applySettings({ sessionProfilePictures: next });
+    }
+    if (legacyLocalPictures[sessionId]) {
+        const nextLocal = { ...legacyLocalPictures };
+        delete nextLocal[sessionId];
+        storage.getState().applyLocalSettings({ sessionProfilePictures: nextLocal });
+    }
+}
+
+export function migrateLocalSessionProfilePicturesToSyncedSettings() {
+    const legacyLocalPictures = storage.getState().localSettings.sessionProfilePictures;
+    const entries = Object.entries(legacyLocalPictures);
+    if (entries.length === 0) {
+        return;
+    }
+
+    sync.applySettings({
+        sessionProfilePictures: {
+            ...legacyLocalPictures,
+            ...storage.getState().settings.sessionProfilePictures,
+        },
+    });
+    storage.getState().applyLocalSettings({ sessionProfilePictures: {} });
 }
 
 export async function pickAndSaveSessionProfilePicture(sessionId: string): Promise<boolean> {

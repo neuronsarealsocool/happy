@@ -35,6 +35,7 @@ import { trackFriendsSearch } from '@/track';
 import { MOBILE_GLASS_HEADER_HEIGHT } from './navigation/headerMetrics';
 import { useNewSessionDraft } from '@/hooks/useNewSessionDraft';
 import { useStartSessionFromDraft } from '@/hooks/useStartSessionFromDraft';
+import { migrateLocalSessionProfilePicturesToSyncedSettings } from '@/utils/sessionProfilePictures';
 
 interface MainViewProps {
     variant: 'phone' | 'sidebar';
@@ -443,6 +444,10 @@ export const MainView = React.memo(({ variant }: MainViewProps) => {
     const bottomContentInset = Platform.OS === 'web'
         ? 0
         : searchActive ? 16 : 92;
+
+    React.useEffect(() => {
+        migrateLocalSessionProfilePicturesToSyncedSettings();
+    }, []);
 
     const handleHomePromptSubmit = React.useCallback(async (): Promise<boolean> => {
         const prompt = homePrompt.trim();

@@ -43,6 +43,7 @@ export const SettingsSchema = z.object({
     avatarStyle: z.string().describe('Avatar display style'),
     showFlavorIcons: z.boolean().describe('Whether to show AI provider icons in avatars'),
     userMessageBubbleColor: z.string().describe('User message bubble color preset'),
+    sessionProfilePictures: z.record(z.string(), z.string()).describe('Custom profile picture data URLs per session, synced across devices'),
     sessionStatusBarDisplay: z.enum(SESSION_STATUS_BAR_DISPLAY_MODES).describe('Whether/where to show the branch, model, effort, and context status bar'),
     usageLimitShowRemaining: z.boolean().describe('Show plan rate limits as quota remaining instead of quota used'),
 
@@ -125,6 +126,7 @@ export const settingsDefaults: Settings = {
     avatarStyle: 'brutalist',
     showFlavorIcons: false,
     userMessageBubbleColor: DEFAULT_USER_MESSAGE_BUBBLE_COLOR,
+    sessionProfilePictures: {},
     // Hidden everywhere by default — the context usage indicator is still too
     // raw to roll out; users can opt back in from appearance settings.
     sessionStatusBarDisplay: 'hidden',
