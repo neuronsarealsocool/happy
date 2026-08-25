@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
+import android.text.InputType
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -20,6 +21,9 @@ import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.view.animation.OvershootInterpolator
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -78,14 +82,14 @@ class ChatHeadOverlayService : Service() {
             width,
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             x = 0
             y = dp(28)
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
 
         overlayView = view
@@ -147,6 +151,7 @@ class ChatHeadOverlayService : Service() {
             background = circleDrawable(Color.rgb(255, 45, 85))
         }
         bubble.addView(badge, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP or Gravity.END))
+        bubble.setOnClickListener { openHappy(sessionId) }
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -213,8 +218,79 @@ class ChatHeadOverlayService : Service() {
         messageParams.setMargins(dp(64), dp(18), dp(8), dp(12))
         card.addView(message, messageParams)
 
-        root.setOnClickListener { openHappy(sessionId) }
-        installDrag(root)
+        val inputRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        card.addView(inputRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        val replyInput = EditText(this).apply {
+            hint = "Aa"
+            textSize = 16f
+            setTextColor(Color.BLACK)
+            setHintTextColor(Color.rgb(142, 142, 147))
+            minHeight = dp(44)
+            maxLines = 4
+            background = roundedDrawable(Color.rgb(239, 240, 244), dp(22).toFloat())
+            setPadding(dp(16), 0, dp(16), 0)
+            isSingleLine = false
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        }
+        inputRow.addView(replyInput, LinearLayout.LayoutParams(0, dp(46), 1f))
+
+        val sendReply = {
+            val reply = replyInput.text?.toString()?.trim().orEmpty()
+            if (reply.isNotEmpty()) {
+                openHappy(sessionId, reply, true)
+            }
+        }
+        replyInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                sendReply()
+                true
+            } else {
+                false
+            }
+        }
+
+        val sendButton = TextView(this).apply {
+            text = "Send"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            background = roundedDrawable(ContextCompat.getColor(context, android.R.color.holo_blue_light), dp(22).toFloat())
+            setOnClickListener { sendReply() }
+        }
+        val sendParams = LinearLayout.LayoutParams(dp(74), dp(44))
+        sendParams.leftMargin = dp(8)
+        inputRow.addView(sendButton, sendParams)
+
+        val openComposer = TextView(this).apply {
+            text = "Open full conversation"
+            setTextColor(ContextCompat.getColor(context, android.R.color.holo_blue_light))
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, 0)
+            setOnClickListener {
+                val draft = replyInput.text?.toString()?.trim().orEmpty()
+                openHappy(sessionId, draft, false)
+            }
+        }
+        card.addView(openComposer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
+        installDrag(bubble)
+        installDrag(header)
+        replyInput.setOnFocusChangeListener { view, hasFocus ->
+            if (hasFocus) {
+                (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
         return root
     }
 
@@ -253,11 +329,24 @@ class ChatHeadOverlayService : Service() {
         }
     }
 
-    private fun openHappy(sessionId: String) {
+    private fun openHappy(sessionId: String, draft: String = "", send: Boolean = false) {
+        val uri = Uri.Builder()
+            .scheme("happy")
+            .authority("session")
+            .apply {
+                if (sessionId.isNotBlank()) {
+                    appendPath(sessionId)
+                }
+                if (draft.isNotBlank()) {
+                    appendQueryParameter("chatHeadDraft", draft)
+                    appendQueryParameter("chatHeadSend", if (send) "1" else "0")
+                }
+            }
+            .build()
         val intent = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            data = if (sessionId.isNotBlank()) Uri.parse("happy://session/$sessionId") else Uri.parse("happy://")
+            data = uri
         }
         startActivity(intent)
         dismiss()

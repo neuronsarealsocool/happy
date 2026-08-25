@@ -14,7 +14,8 @@ class HappyNotificationListenerService : NotificationListenerService() {
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         val body = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-        val sessionId = extras.getString("sessionId")
+        val sessionId = listOf("sessionId", "session_id", "conversationId", "conversation_id", "sid")
+            .firstNotNullOfOrNull { key -> extras.getString(key)?.takeIf { it.isNotBlank() } }
 
         ChatHeadOverlayService.start(
             applicationContext,
