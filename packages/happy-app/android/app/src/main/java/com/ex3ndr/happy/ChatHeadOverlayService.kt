@@ -18,9 +18,11 @@ import android.text.InputType
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewOutlineProvider
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
@@ -30,6 +32,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
@@ -40,6 +43,8 @@ class ChatHeadOverlayService : Service() {
     private var overlayView: View? = null
     private var params: WindowManager.LayoutParams? = null
     private var isExpanded = true
+    private var currentSessionId = ""
+    private val pendingReplies = mutableMapOf<String, MutableList<ChatHeadMessage>>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -53,16 +58,22 @@ class ChatHeadOverlayService : Service() {
             dismiss()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_REFRESH) {
+            refreshVisibleSession(intent.getStringExtra(EXTRA_SESSION_ID).orEmpty())
+            return START_NOT_STICKY
+        }
         val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Happy" }
         val body = intent?.getStringExtra(EXTRA_BODY).orEmpty().ifBlank { "New message" }
         val sessionId = intent?.getStringExtra(EXTRA_SESSION_ID).orEmpty()
         val avatarUri = intent?.getStringExtra(EXTRA_AVATAR_URI).orEmpty()
         val cached = ChatHeadSessionCache.load(this, sessionId)
+            ?: ChatHeadSessionCache.findByNotification(this, title, body)
         val displayTitle = cached?.title?.takeIf { it.isNotBlank() } ?: title
         val displayAvatarUri = cached?.avatarUri?.takeIf { it.isNotBlank() } ?: avatarUri
+        val displaySessionId = cached?.sessionId?.takeIf { it.isNotBlank() } ?: sessionId
         val displayMessages = cached?.messages?.takeIf { it.isNotEmpty() }
             ?: listOf(ChatHeadMessage(body, outgoing = false))
-        show(displayTitle, sessionId, displayAvatarUri, displayMessages)
+        show(displayTitle, displaySessionId, displayAvatarUri, displayMessages)
         return START_NOT_STICKY
     }
 
@@ -79,7 +90,8 @@ class ChatHeadOverlayService : Service() {
         dismiss()
         isExpanded = true
 
-        val view = buildOverlay(title, sessionId, avatarUri, messages)
+        val view = buildOverlay(title, sessionId, avatarUri, messagesForDisplay(sessionId, messages))
+        currentSessionId = sessionId
         val width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -213,10 +225,24 @@ class ChatHeadOverlayService : Service() {
         val messagesColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
-        card.addView(messagesColumn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        messages.takeLast(6).forEach { message ->
+        val messagesScroll = ScrollView(this).apply {
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            setPadding(0, dp(8), 0, 0)
+        }
+        val messagesHeight = (resources.displayMetrics.heightPixels * 0.42f)
+            .roundToInt()
+            .coerceAtLeast(dp(180))
+            .coerceAtMost(dp(420))
+        val focusedMessagesHeight = (resources.displayMetrics.heightPixels * 0.16f)
+            .roundToInt()
+            .coerceAtLeast(dp(120))
+            .coerceAtMost(dp(180))
+        card.addView(messagesScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, messagesHeight))
+        messagesScroll.addView(messagesColumn, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        messages.forEach { message ->
             appendMessageBubble(messagesColumn, message.text, outgoing = message.outgoing)
         }
+        messagesScroll.post { messagesScroll.fullScroll(View.FOCUS_DOWN) }
 
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -231,13 +257,12 @@ class ChatHeadOverlayService : Service() {
             setTextColor(Color.BLACK)
             setHintTextColor(Color.rgb(142, 142, 147))
             minHeight = dp(44)
-            maxLines = 4
+            maxLines = 1
             background = roundedDrawable(Color.rgb(239, 240, 244), dp(22).toFloat())
             setPadding(dp(16), 0, dp(16), 0)
-            isSingleLine = false
+            isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         }
         inputRow.addView(replyInput, LinearLayout.LayoutParams(0, dp(46), 1f))
@@ -246,14 +271,20 @@ class ChatHeadOverlayService : Service() {
             val reply = replyInput.text?.toString()?.trim().orEmpty()
             if (reply.isNotEmpty()) {
                 appendMessageBubble(messagesColumn, reply, outgoing = true)
+                if (sessionId.isNotBlank()) {
+                    pendingReplies.getOrPut(sessionId) { mutableListOf() }
+                        .add(ChatHeadMessage(reply, outgoing = true))
+                }
+                messagesScroll.post { messagesScroll.fullScroll(View.FOCUS_DOWN) }
                 replyInput.text?.clear()
                 if (sessionId.isNotBlank()) {
                     openHappy(sessionId, reply, true, dismissOverlay = false)
                 }
             }
         }
-        replyInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEND) {
+        replyInput.setOnEditorActionListener { _, actionId, event ->
+            val isEnter = event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_UP
+            if (actionId == EditorInfo.IME_ACTION_SEND || isEnter) {
                 sendReply()
                 true
             } else {
@@ -297,6 +328,13 @@ class ChatHeadOverlayService : Service() {
             }
         }
         replyInput.setOnFocusChangeListener { view, hasFocus ->
+            messagesScroll.layoutParams = messagesScroll.layoutParams.apply {
+                height = if (hasFocus) focusedMessagesHeight else messagesHeight
+            }
+            messagesScroll.post { messagesScroll.fullScroll(View.FOCUS_DOWN) }
+            overlayView?.let { overlay ->
+                runCatching { windowManager.updateViewLayout(overlay, params) }
+            }
             if (hasFocus) {
                 (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                     .showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
@@ -315,7 +353,6 @@ class ChatHeadOverlayService : Service() {
                 dp(22).toFloat()
             )
             setPadding(dp(18), dp(12), dp(18), dp(12))
-            maxLines = 8
         }
         val messageParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         messageParams.gravity = if (outgoing) Gravity.END else Gravity.START
@@ -417,10 +454,37 @@ class ChatHeadOverlayService : Service() {
         val view = overlayView ?: return
         overlayView = null
         params = null
+        currentSessionId = ""
         handler.post {
             runCatching { windowManager.removeView(view) }
                 .onFailure { Log.w(TAG, "Failed to remove chat head view", it) }
         }
+    }
+
+    private fun refreshVisibleSession(sessionId: String) {
+        if (overlayView == null || sessionId.isBlank() || sessionId != currentSessionId) {
+            return
+        }
+        val cached = ChatHeadSessionCache.load(this, sessionId) ?: return
+        show(cached.title.ifBlank { "Happy" }, cached.sessionId, cached.avatarUri, cached.messages)
+    }
+
+    private fun messagesForDisplay(sessionId: String, cachedMessages: List<ChatHeadMessage>): List<ChatHeadMessage> {
+        if (sessionId.isBlank()) return cachedMessages
+        val pending = pendingReplies[sessionId].orEmpty()
+        if (pending.isEmpty()) return cachedMessages
+
+        val remainingPending = pending.filterNot { pendingMessage ->
+            cachedMessages.any { cachedMessage ->
+                cachedMessage.outgoing == pendingMessage.outgoing && cachedMessage.text == pendingMessage.text
+            }
+        }
+        if (remainingPending.isEmpty()) {
+            pendingReplies.remove(sessionId)
+            return cachedMessages
+        }
+        pendingReplies[sessionId] = remainingPending.toMutableList()
+        return cachedMessages + remainingPending
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
@@ -450,6 +514,7 @@ class ChatHeadOverlayService : Service() {
 
     companion object {
         const val ACTION_DISMISS = "com.ex3ndr.happy.chathead.DISMISS"
+        const val ACTION_REFRESH = "com.ex3ndr.happy.chathead.REFRESH"
         const val EXTRA_TITLE = "title"
         const val EXTRA_BODY = "body"
         const val EXTRA_SESSION_ID = "sessionId"
@@ -466,6 +531,15 @@ class ChatHeadOverlayService : Service() {
                 putExtra(EXTRA_BODY, body)
                 putExtra(EXTRA_SESSION_ID, sessionId)
                 putExtra(EXTRA_AVATAR_URI, avatarUri)
+            }
+            context.startService(intent)
+        }
+
+        fun refresh(context: Context, sessionId: String) {
+            if (sessionId.isBlank()) return
+            val intent = Intent(context, ChatHeadOverlayService::class.java).apply {
+                action = ACTION_REFRESH
+                putExtra(EXTRA_SESSION_ID, sessionId)
             }
             context.startService(intent)
         }

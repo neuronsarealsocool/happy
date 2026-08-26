@@ -1,5 +1,7 @@
 import { NativeModules, Platform } from 'react-native';
 import type { Message } from '@/sync/typesMessage';
+import type { Session } from '@/sync/storageTypes';
+import { getSessionName } from '@/utils/sessionUtils';
 
 type HappyChatHeadsModule = {
     canDrawOverlays: () => Promise<boolean>;
@@ -74,8 +76,7 @@ export function cacheAndroidChatHeadSession(
                 return text ? [{ text, outgoing: false }] : [];
             }
             return [];
-        })
-        .slice(-12);
+        });
 
     nativeModule.cacheSession(
         sessionId,
@@ -83,4 +84,26 @@ export function cacheAndroidChatHeadSession(
         avatarUri ?? '',
         JSON.stringify(chatMessages)
     );
+}
+
+export function cacheAndroidChatHeadSessionSummaries(
+    sessions: Session[],
+    sessionProfilePictures: Record<string, string>,
+    legacySessionProfilePictures: Record<string, string>
+) {
+    if (Platform.OS !== 'android' || !nativeModule) {
+        return;
+    }
+
+    sessions.forEach((session) => {
+        if (!session.id || session.metadata?.isSideChat) {
+            return;
+        }
+        nativeModule.cacheSession(
+            session.id,
+            getSessionName(session),
+            sessionProfilePictures[session.id] ?? legacySessionProfilePictures[session.id] ?? '',
+            undefined
+        );
+    });
 }

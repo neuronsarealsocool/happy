@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
-import { useFriendRequests, useSocketStatus, useRealtimeStatus, useSettingMutable } from '@/sync/storage';
+import { useAllSessions, useFriendRequests, useLocalSetting, useSocketStatus, useRealtimeStatus, useSetting, useSettingMutable } from '@/sync/storage';
 import { useHasArchivedSessions, useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
 import { useIsTablet } from '@/utils/responsive';
 import { useRouter } from 'expo-router';
@@ -36,6 +36,7 @@ import { MOBILE_GLASS_HEADER_HEIGHT } from './navigation/headerMetrics';
 import { useNewSessionDraft } from '@/hooks/useNewSessionDraft';
 import { useStartSessionFromDraft } from '@/hooks/useStartSessionFromDraft';
 import { migrateLocalSessionProfilePicturesToSyncedSettings } from '@/utils/sessionProfilePictures';
+import { cacheAndroidChatHeadSessionSummaries } from '@/utils/androidChatHeads';
 
 interface MainViewProps {
     variant: 'phone' | 'sidebar';
@@ -415,6 +416,9 @@ const HeaderRight = React.memo(({
 export const MainView = React.memo(({ variant }: MainViewProps) => {
     const { theme } = useUnistyles();
     const sessionListViewData = useVisibleSessionListViewData();
+    const allSessions = useAllSessions();
+    const sessionProfilePictures = useSetting('sessionProfilePictures');
+    const legacySessionProfilePictures = useLocalSetting('sessionProfilePictures');
     const hasArchivedSessions = useHasArchivedSessions();
     // Stored under its original `hideInactiveSessions` key — synced settings
     // have no rename migration — but it hides archived sessions only.
@@ -448,6 +452,14 @@ export const MainView = React.memo(({ variant }: MainViewProps) => {
     React.useEffect(() => {
         migrateLocalSessionProfilePicturesToSyncedSettings();
     }, []);
+
+    React.useEffect(() => {
+        cacheAndroidChatHeadSessionSummaries(
+            allSessions,
+            sessionProfilePictures,
+            legacySessionProfilePictures
+        );
+    }, [allSessions, sessionProfilePictures, legacySessionProfilePictures]);
 
     const handleHomePromptSubmit = React.useCallback(async (): Promise<boolean> => {
         const prompt = homePrompt.trim();

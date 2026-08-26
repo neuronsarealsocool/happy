@@ -29,11 +29,16 @@ object ChatHeadSessionCache {
     ) {
         if (sessionId.isBlank()) return
 
-        val messages = parseMessages(messagesJson).takeLast(12)
+        val existing = load(context, sessionId)
+        val messages = if (messagesJson == null) {
+            existing?.messages.orEmpty()
+        } else {
+            parseMessages(messagesJson)
+        }
         val payload = JSONObject().apply {
             put("sessionId", sessionId)
-            put("title", title.orEmpty())
-            put("avatarUri", avatarUri.orEmpty())
+            put("title", title?.takeIf { it.isNotBlank() } ?: existing?.title.orEmpty())
+            put("avatarUri", avatarUri?.takeIf { it.isNotBlank() } ?: existing?.avatarUri.orEmpty())
             put("messages", JSONArray().apply {
                 messages.forEach { message ->
                     put(JSONObject().apply {
@@ -57,15 +62,24 @@ object ChatHeadSessionCache {
             .getString(KEY_PREFIX + sessionId, null)
             ?: return null
 
-        return runCatching {
-            val payload = JSONObject(raw)
-            ChatHeadSessionSnapshot(
-                sessionId = payload.optString("sessionId", sessionId),
-                title = payload.optString("title"),
-                avatarUri = payload.optString("avatarUri"),
-                messages = parseMessages(payload.optJSONArray("messages"))
-            )
-        }.getOrNull()
+        return parseSnapshot(raw, sessionId)
+    }
+
+    fun findByNotification(context: Context, title: String?, body: String?): ChatHeadSessionSnapshot? {
+        val needles = listOfNotNull(title, body)
+            .map(::normalize)
+            .filter { it.isNotBlank() }
+        if (needles.isEmpty()) return null
+
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .all
+            .asSequence()
+            .filter { (key, value) -> key.startsWith(KEY_PREFIX) && value is String }
+            .mapNotNull { (_, value) -> parseSnapshot(value as String, null) }
+            .map { snapshot -> snapshot to scoreSnapshot(snapshot, needles) }
+            .filter { (_, score) -> score > 0 }
+            .maxByOrNull { (_, score) -> score }
+            ?.first
     }
 
     private fun parseMessages(messagesJson: String?): List<ChatHeadMessage> {
@@ -88,5 +102,43 @@ object ChatHeadSessionCache {
             )
         }
         return result
+    }
+
+    private fun parseSnapshot(raw: String, fallbackSessionId: String?): ChatHeadSessionSnapshot? {
+        return runCatching {
+            val payload = JSONObject(raw)
+            ChatHeadSessionSnapshot(
+                sessionId = payload.optString("sessionId", fallbackSessionId.orEmpty()),
+                title = payload.optString("title"),
+                avatarUri = payload.optString("avatarUri"),
+                messages = parseMessages(payload.optJSONArray("messages"))
+            )
+        }.getOrNull()
+    }
+
+    private fun scoreSnapshot(snapshot: ChatHeadSessionSnapshot, needles: List<String>): Int {
+        val normalizedTitle = normalize(snapshot.title)
+        val titleScore = needles.maxOf { needle ->
+            when {
+                normalizedTitle == needle -> 100
+                normalizedTitle.contains(needle) || needle.contains(normalizedTitle) -> 60
+                else -> 0
+            }
+        }
+        val messageScore = snapshot.messages.maxOfOrNull { message ->
+            val normalizedMessage = normalize(message.text)
+            needles.maxOf { needle ->
+                when {
+                    normalizedMessage == needle -> 30
+                    normalizedMessage.contains(needle) || needle.contains(normalizedMessage) -> 10
+                    else -> 0
+                }
+            }
+        } ?: 0
+        return titleScore + messageScore
+    }
+
+    private fun normalize(value: String): String {
+        return value.lowercase().trim().replace(Regex("""\s+"""), " ")
     }
 }
