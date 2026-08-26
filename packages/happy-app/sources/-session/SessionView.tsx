@@ -32,6 +32,8 @@ import { sessionAbort, sessionGoalAction, sessionSetAgentModes, spawnSideChat, s
 import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionGitStatus, useSessionMessages, useSessionUsage, useSetting, useSideChatSessions } from '@/sync/storage';
 import { useSession } from '@/sync/storage';
 import { getSessionForkSource } from '@/utils/sessionFork';
+import { useSessionProfilePicture } from '@/utils/sessionProfilePictures';
+import { cacheAndroidChatHeadSession } from '@/utils/androidChatHeads';
 import { useHappyAction } from '@/hooks/useHappyAction';
 import { HappyError } from '@/utils/errors';
 import { Session } from '@/sync/storageTypes';
@@ -933,6 +935,7 @@ export function SessionViewLoaded({
 
     const realtimeStatus = useRealtimeStatus();
     const { messages, isLoaded } = useSessionMessages(sessionId);
+    const sessionProfilePicture = useSessionProfilePicture(sessionId);
     const registerDetectedPreview = useSessionPreviewStore((state) => state.registerDetectedPreview);
     const togglePreviewTarget = useSessionPreviewStore((state) => state.togglePreviewTarget);
     const acknowledgedCliVersions = useLocalSetting('acknowledgedCliVersions');
@@ -1242,6 +1245,18 @@ export function SessionViewLoaded({
     React.useEffect(() => {
         registerDetectedPreview(sessionId, discoverSessionPreviewTarget(messages, { projectPath: session.metadata?.path }));
     }, [messages, registerDetectedPreview, session.metadata?.path, sessionId]);
+
+    React.useEffect(() => {
+        if (!isLoaded) {
+            return;
+        }
+        cacheAndroidChatHeadSession(
+            sessionId,
+            getSessionName(session),
+            sessionProfilePicture,
+            messages
+        );
+    }, [isLoaded, messages, session, sessionId, sessionProfilePicture]);
 
     React.useEffect(() => {
         const unregisterFocusPrompt = registerShortcutHandler('app.focusPrompt', () => {

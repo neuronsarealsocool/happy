@@ -55,4 +55,9 @@ class ChatHeadModule(private val reactContext: ReactApplicationContext) : ReactC
     fun showTestChatHead(title: String?, body: String?, sessionId: String?, avatarUri: String?) {
         ChatHeadOverlayService.start(reactContext, title, body, sessionId, avatarUri)
     }
+
+    @ReactMethod
+    fun cacheSession(sessionId: String, title: String?, avatarUri: String?, messagesJson: String?) {
+        ChatHeadSessionCache.save(reactContext, sessionId, title, avatarUri, messagesJson)
+    }
 }

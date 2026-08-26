@@ -3,6 +3,7 @@ package com.ex3ndr.happy
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Typeface
@@ -14,6 +15,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.util.Base64
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -37,6 +39,7 @@ class ChatHeadOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
     private var params: WindowManager.LayoutParams? = null
+    private var isExpanded = true
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -54,7 +57,12 @@ class ChatHeadOverlayService : Service() {
         val body = intent?.getStringExtra(EXTRA_BODY).orEmpty().ifBlank { "New message" }
         val sessionId = intent?.getStringExtra(EXTRA_SESSION_ID).orEmpty()
         val avatarUri = intent?.getStringExtra(EXTRA_AVATAR_URI).orEmpty()
-        show(title, body, sessionId, avatarUri)
+        val cached = ChatHeadSessionCache.load(this, sessionId)
+        val displayTitle = cached?.title?.takeIf { it.isNotBlank() } ?: title
+        val displayAvatarUri = cached?.avatarUri?.takeIf { it.isNotBlank() } ?: avatarUri
+        val displayMessages = cached?.messages?.takeIf { it.isNotEmpty() }
+            ?: listOf(ChatHeadMessage(body, outgoing = false))
+        show(displayTitle, sessionId, displayAvatarUri, displayMessages)
         return START_NOT_STICKY
     }
 
@@ -63,14 +71,15 @@ class ChatHeadOverlayService : Service() {
         super.onDestroy()
     }
 
-    private fun show(title: String, body: String, sessionId: String, avatarUri: String) {
+    private fun show(title: String, sessionId: String, avatarUri: String, messages: List<ChatHeadMessage>) {
         if (!canDrawOverlays(this)) {
             Log.w(TAG, "Cannot show chat head: overlay permission is not granted")
             return
         }
         dismiss()
+        isExpanded = true
 
-        val view = buildOverlay(title, body, sessionId, avatarUri)
+        val view = buildOverlay(title, sessionId, avatarUri, messages)
         val width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -118,7 +127,7 @@ class ChatHeadOverlayService : Service() {
             .start()
     }
 
-    private fun buildOverlay(title: String, body: String, sessionId: String, avatarUri: String): View {
+    private fun buildOverlay(title: String, sessionId: String, avatarUri: String, messages: List<ChatHeadMessage>): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -136,9 +145,7 @@ class ChatHeadOverlayService : Service() {
         val avatar = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setImageResource(R.mipmap.ic_launcher_round)
-            if (avatarUri.isNotBlank()) {
-                runCatching { setImageURI(Uri.parse(avatarUri)) }
-            }
+            setAvatarImage(this, avatarUri)
         }
         bubble.addView(avatar, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER))
 
@@ -151,7 +158,6 @@ class ChatHeadOverlayService : Service() {
             background = circleDrawable(Color.rgb(255, 45, 85))
         }
         bubble.addView(badge, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP or Gravity.END))
-        bubble.setOnClickListener { openHappy(sessionId) }
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -174,9 +180,7 @@ class ChatHeadOverlayService : Service() {
             setImageResource(R.mipmap.ic_launcher_round)
             outlineProvider = circleOutlineProvider(dp(52))
             clipToOutline = true
-            if (avatarUri.isNotBlank()) {
-                runCatching { setImageURI(Uri.parse(avatarUri)) }
-            }
+            setAvatarImage(this, avatarUri)
         }
         header.addView(smallAvatar, LinearLayout.LayoutParams(dp(52), dp(52)))
 
@@ -210,7 +214,9 @@ class ChatHeadOverlayService : Service() {
             orientation = LinearLayout.VERTICAL
         }
         card.addView(messagesColumn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        appendMessageBubble(messagesColumn, body, outgoing = false)
+        messages.takeLast(6).forEach { message ->
+            appendMessageBubble(messagesColumn, message.text, outgoing = message.outgoing)
+        }
 
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -283,6 +289,13 @@ class ChatHeadOverlayService : Service() {
 
         installDrag(bubble)
         installDrag(header)
+        bubble.setOnClickListener {
+            isExpanded = !isExpanded
+            card.visibility = if (isExpanded) View.VISIBLE else View.GONE
+            overlayView?.let { view ->
+                runCatching { windowManager.updateViewLayout(view, params) }
+            }
+        }
         replyInput.setOnFocusChangeListener { view, hasFocus ->
             if (hasFocus) {
                 (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
@@ -314,6 +327,26 @@ class ChatHeadOverlayService : Service() {
         container.addView(message, messageParams)
     }
 
+    private fun setAvatarImage(imageView: ImageView, avatarUri: String) {
+        if (avatarUri.isBlank()) return
+        if (avatarUri.startsWith("data:image/")) {
+            val base64Data = avatarUri.substringAfter("base64,", missingDelimiterValue = "")
+            if (base64Data.isNotBlank()) {
+                runCatching {
+                    val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap != null) {
+                        imageView.setImageBitmap(bitmap)
+                    }
+                }.onFailure { Log.w(TAG, "Failed to decode chat head avatar", it) }
+            }
+            return
+        }
+
+        runCatching { imageView.setImageURI(Uri.parse(avatarUri)) }
+            .onFailure { Log.w(TAG, "Failed to load chat head avatar URI", it) }
+    }
+
     private fun installDrag(view: View) {
         var startX = 0
         var startY = 0
@@ -332,7 +365,9 @@ class ChatHeadOverlayService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     p.x = startX + (event.rawX - touchX).roundToInt()
                     p.y = (startY + (event.rawY - touchY).roundToInt()).coerceAtLeast(0)
-                    runCatching { windowManager.updateViewLayout(view, p) }
+                    overlayView?.let { overlay ->
+                        runCatching { windowManager.updateViewLayout(overlay, p) }
+                    }
                     true
                 }
                 else -> false
