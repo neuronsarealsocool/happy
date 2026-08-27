@@ -44,6 +44,7 @@ class ChatHeadOverlayService : Service() {
     private var params: WindowManager.LayoutParams? = null
     private var isExpanded = true
     private var currentSessionId = ""
+    private var currentTranscriptScrollY = 0
     private val pendingReplies = mutableMapOf<String, MutableList<ChatHeadMessage>>()
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -73,7 +74,8 @@ class ChatHeadOverlayService : Service() {
         val displaySessionId = cached?.sessionId?.takeIf { it.isNotBlank() } ?: sessionId
         val displayMessages = cached?.messages?.takeIf { it.isNotEmpty() }
             ?: listOf(ChatHeadMessage(body, outgoing = false))
-        show(displayTitle, displaySessionId, displayAvatarUri, displayMessages)
+        currentTranscriptScrollY = 0
+        show(displayTitle, displaySessionId, displayAvatarUri, displayMessages, autoScrollToBottom = true)
         return START_NOT_STICKY
     }
 
@@ -82,7 +84,14 @@ class ChatHeadOverlayService : Service() {
         super.onDestroy()
     }
 
-    private fun show(title: String, sessionId: String, avatarUri: String, messages: List<ChatHeadMessage>) {
+    private fun show(
+        title: String,
+        sessionId: String,
+        avatarUri: String,
+        messages: List<ChatHeadMessage>,
+        autoScrollToBottom: Boolean,
+        restoreScrollY: Int = 0
+    ) {
         if (!canDrawOverlays(this)) {
             Log.w(TAG, "Cannot show chat head: overlay permission is not granted")
             return
@@ -90,7 +99,14 @@ class ChatHeadOverlayService : Service() {
         dismiss()
         isExpanded = true
 
-        val view = buildOverlay(title, sessionId, avatarUri, messagesForDisplay(sessionId, messages))
+        val view = buildOverlay(
+            title,
+            sessionId,
+            avatarUri,
+            messagesForDisplay(sessionId, messages),
+            autoScrollToBottom,
+            restoreScrollY
+        )
         currentSessionId = sessionId
         val width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -139,7 +155,14 @@ class ChatHeadOverlayService : Service() {
             .start()
     }
 
-    private fun buildOverlay(title: String, sessionId: String, avatarUri: String, messages: List<ChatHeadMessage>): View {
+    private fun buildOverlay(
+        title: String,
+        sessionId: String,
+        avatarUri: String,
+        messages: List<ChatHeadMessage>,
+        autoScrollToBottom: Boolean,
+        restoreScrollY: Int
+    ): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -228,6 +251,11 @@ class ChatHeadOverlayService : Service() {
         val messagesScroll = ScrollView(this).apply {
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             setPadding(0, dp(8), 0, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                setOnScrollChangeListener { _, _, scrollY, _, _ ->
+                    currentTranscriptScrollY = scrollY
+                }
+            }
         }
         val messagesHeight = (resources.displayMetrics.heightPixels * 0.42f)
             .roundToInt()
@@ -242,7 +270,13 @@ class ChatHeadOverlayService : Service() {
         messages.forEach { message ->
             appendMessageBubble(messagesColumn, message.text, outgoing = message.outgoing)
         }
-        messagesScroll.post { messagesScroll.fullScroll(View.FOCUS_DOWN) }
+        messagesScroll.post {
+            if (autoScrollToBottom) {
+                messagesScroll.fullScroll(View.FOCUS_DOWN)
+            } else {
+                messagesScroll.scrollTo(0, restoreScrollY)
+            }
+        }
 
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -270,15 +304,18 @@ class ChatHeadOverlayService : Service() {
         val sendReply = {
             val reply = replyInput.text?.toString()?.trim().orEmpty()
             if (reply.isNotEmpty()) {
+                val nonce = System.currentTimeMillis().toString()
                 appendMessageBubble(messagesColumn, reply, outgoing = true)
                 if (sessionId.isNotBlank()) {
                     pendingReplies.getOrPut(sessionId) { mutableListOf() }
                         .add(ChatHeadMessage(reply, outgoing = true))
+                    ChatHeadSessionCache.enqueuePendingReply(this, sessionId, reply, nonce)
                 }
+                currentTranscriptScrollY = Int.MAX_VALUE
                 messagesScroll.post { messagesScroll.fullScroll(View.FOCUS_DOWN) }
                 replyInput.text?.clear()
                 if (sessionId.isNotBlank()) {
-                    openHappy(sessionId, reply, true, dismissOverlay = false)
+                    openHappy(sessionId, reply, true, dismissOverlay = false, nonce = nonce)
                 }
             }
         }
@@ -331,7 +368,8 @@ class ChatHeadOverlayService : Service() {
             messagesScroll.layoutParams = messagesScroll.layoutParams.apply {
                 height = if (hasFocus) focusedMessagesHeight else messagesHeight
             }
-            messagesScroll.post { messagesScroll.fullScroll(View.FOCUS_DOWN) }
+            val scrollY = currentTranscriptScrollY
+            messagesScroll.post { messagesScroll.scrollTo(0, scrollY) }
             overlayView?.let { overlay ->
                 runCatching { windowManager.updateViewLayout(overlay, params) }
             }
@@ -421,8 +459,14 @@ class ChatHeadOverlayService : Service() {
         }
     }
 
-    private fun openHappy(sessionId: String, draft: String = "", send: Boolean = false, dismissOverlay: Boolean = true) {
-        val uri = buildHappySessionUri(sessionId, draft, send)
+    private fun openHappy(
+        sessionId: String,
+        draft: String = "",
+        send: Boolean = false,
+        dismissOverlay: Boolean = true,
+        nonce: String = System.currentTimeMillis().toString()
+    ) {
+        val uri = buildHappySessionUri(sessionId, draft, send, nonce)
         val intent = Intent(this, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -434,7 +478,7 @@ class ChatHeadOverlayService : Service() {
         }
     }
 
-    private fun buildHappySessionUri(sessionId: String, draft: String = "", send: Boolean = false): Uri {
+    private fun buildHappySessionUri(sessionId: String, draft: String = "", send: Boolean = false, nonce: String): Uri {
         if (sessionId.isBlank()) {
             return Uri.parse("happy:///")
         }
@@ -446,6 +490,8 @@ class ChatHeadOverlayService : Service() {
                 .append(Uri.encode(draft))
                 .append("&chatHeadSend=")
                 .append(if (send) "1" else "0")
+                .append("&chatHeadNonce=")
+                .append(Uri.encode(nonce))
         }
         return Uri.parse(uri.toString())
     }
@@ -455,6 +501,7 @@ class ChatHeadOverlayService : Service() {
         overlayView = null
         params = null
         currentSessionId = ""
+        currentTranscriptScrollY = 0
         handler.post {
             runCatching { windowManager.removeView(view) }
                 .onFailure { Log.w(TAG, "Failed to remove chat head view", it) }
@@ -466,7 +513,14 @@ class ChatHeadOverlayService : Service() {
             return
         }
         val cached = ChatHeadSessionCache.load(this, sessionId) ?: return
-        show(cached.title.ifBlank { "Happy" }, cached.sessionId, cached.avatarUri, cached.messages)
+        show(
+            cached.title.ifBlank { "Happy" },
+            cached.sessionId,
+            cached.avatarUri,
+            cached.messages,
+            autoScrollToBottom = false,
+            restoreScrollY = currentTranscriptScrollY
+        )
     }
 
     private fun messagesForDisplay(sessionId: String, cachedMessages: List<ChatHeadMessage>): List<ChatHeadMessage> {

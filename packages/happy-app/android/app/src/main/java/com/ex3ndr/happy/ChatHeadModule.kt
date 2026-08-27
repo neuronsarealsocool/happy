@@ -61,4 +61,9 @@ class ChatHeadModule(private val reactContext: ReactApplicationContext) : ReactC
         ChatHeadSessionCache.save(reactContext, sessionId, title, avatarUri, messagesJson)
         ChatHeadOverlayService.refresh(reactContext, sessionId)
     }
+
+    @ReactMethod
+    fun consumePendingReplies(sessionId: String, promise: Promise) {
+        promise.resolve(ChatHeadSessionCache.consumePendingReplies(reactContext, sessionId))
+    }
 }

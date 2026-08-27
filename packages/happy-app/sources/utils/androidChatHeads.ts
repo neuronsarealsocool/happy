@@ -10,6 +10,7 @@ type HappyChatHeadsModule = {
     openNotificationListenerSettings: () => void;
     showTestChatHead: (title?: string, body?: string, sessionId?: string, avatarUri?: string) => void;
     cacheSession: (sessionId: string, title?: string, avatarUri?: string, messagesJson?: string) => void;
+    consumePendingReplies: (sessionId: string) => Promise<string>;
 };
 
 const nativeModule = NativeModules.HappyChatHeads as HappyChatHeadsModule | undefined;
@@ -106,4 +107,37 @@ export function cacheAndroidChatHeadSessionSummaries(
             undefined
         );
     });
+}
+
+export type AndroidChatHeadPendingReply = {
+    id: string;
+    text: string;
+    createdAt: number;
+};
+
+export async function consumeAndroidChatHeadPendingReplies(sessionId: string): Promise<AndroidChatHeadPendingReply[]> {
+    if (Platform.OS !== 'android' || !nativeModule || !sessionId) {
+        return [];
+    }
+
+    const raw = await nativeModule.consumePendingReplies(sessionId);
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed.flatMap((item) => {
+            const text = typeof item?.text === 'string' ? item.text.trim() : '';
+            if (!text) {
+                return [];
+            }
+            return [{
+                id: typeof item?.id === 'string' ? item.id : `${Date.now()}`,
+                text,
+                createdAt: typeof item?.createdAt === 'number' ? item.createdAt : Date.now(),
+            }];
+        });
+    } catch {
+        return [];
+    }
 }

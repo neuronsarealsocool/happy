@@ -19,6 +19,7 @@ data class ChatHeadSessionSnapshot(
 object ChatHeadSessionCache {
     private const val PREFS_NAME = "happy_chat_head_sessions"
     private const val KEY_PREFIX = "session:"
+    private const val PENDING_REPLY_PREFIX = "pending-replies:"
 
     fun save(
         context: Context,
@@ -80,6 +81,30 @@ object ChatHeadSessionCache {
             .filter { (_, score) -> score > 0 }
             .maxByOrNull { (_, score) -> score }
             ?.first
+    }
+
+    fun enqueuePendingReply(context: Context, sessionId: String, text: String, nonce: String) {
+        val trimmed = text.trim()
+        if (sessionId.isBlank() || trimmed.isBlank()) return
+
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val key = PENDING_REPLY_PREFIX + sessionId
+        val pending = runCatching { JSONArray(prefs.getString(key, "[]")) }.getOrElse { JSONArray() }
+        pending.put(JSONObject().apply {
+            put("id", nonce)
+            put("text", trimmed)
+            put("createdAt", System.currentTimeMillis())
+        })
+        prefs.edit().putString(key, pending.toString()).apply()
+    }
+
+    fun consumePendingReplies(context: Context, sessionId: String): String {
+        if (sessionId.isBlank()) return "[]"
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val key = PENDING_REPLY_PREFIX + sessionId
+        val raw = prefs.getString(key, "[]") ?: "[]"
+        prefs.edit().remove(key).apply()
+        return raw
     }
 
     private fun parseMessages(messagesJson: String?): List<ChatHeadMessage> {
