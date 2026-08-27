@@ -36,6 +36,7 @@ import { applyVoiceUpsellOverride } from '@/realtime/voiceExperiment';
 import { useTauriZoom } from '@/hooks/useTauriZoom';
 import { useTauriDrag } from '@/hooks/useTauriDrag';
 import { BrowserNavigationShortcuts } from '@/hooks/useBrowserNavigationShortcuts';
+import { AndroidChatHeadBridge } from '@/components/AndroidChatHeadBridge';
 
 // Configure notification handler — suppress push display when app is in foreground
 Notifications.setNotificationHandler({
@@ -396,6 +397,7 @@ export default function RootLayout() {
                         : { flex: 1, backgroundColor: theme.colors.groupped.background }}
                 >
                     <AuthProvider initialCredentials={initState.credentials}>
+                        <AndroidChatHeadBridge />
                         <ThemeProvider value={navigationTheme}>
                             <StatusBarProvider />
                             <ModalProvider>

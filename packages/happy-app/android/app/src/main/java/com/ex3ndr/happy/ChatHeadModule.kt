@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.text.TextUtils
+import com.facebook.react.ReactApplication
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -65,5 +67,29 @@ class ChatHeadModule(private val reactContext: ReactApplicationContext) : ReactC
     @ReactMethod
     fun consumePendingReplies(sessionId: String, promise: Promise) {
         promise.resolve(ChatHeadSessionCache.consumePendingReplies(reactContext, sessionId))
+    }
+
+    @ReactMethod
+    fun getActiveSessionId(promise: Promise) {
+        promise.resolve(ChatHeadOverlayService.activeSessionId())
+    }
+
+    @ReactMethod
+    fun addListener(eventName: String) = Unit
+
+    @ReactMethod
+    fun removeListeners(count: Int) = Unit
+
+    companion object {
+        const val EVENT_OPENED = "HappyChatHeadOpened"
+        const val EVENT_REPLY_QUEUED = "HappyChatHeadReplyQueued"
+
+        fun emit(context: android.content.Context, eventName: String, sessionId: String): Boolean {
+            val reactApplication = context.applicationContext as? ReactApplication ?: return false
+            val reactContext = reactApplication.reactHost?.currentReactContext ?: return false
+            val payload = Arguments.createMap().apply { putString("sessionId", sessionId) }
+            reactContext.emitDeviceEvent(eventName, payload)
+            return true
+        }
     }
 }

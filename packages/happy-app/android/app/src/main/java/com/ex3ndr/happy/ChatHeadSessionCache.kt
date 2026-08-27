@@ -107,6 +107,14 @@ object ChatHeadSessionCache {
         return raw
     }
 
+    fun hasPendingReplies(context: Context, sessionId: String): Boolean {
+        if (sessionId.isBlank()) return false
+        val raw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PENDING_REPLY_PREFIX + sessionId, null)
+            ?: return false
+        return runCatching { JSONArray(raw).length() > 0 }.getOrDefault(false)
+    }
+
     private fun parseMessages(messagesJson: String?): List<ChatHeadMessage> {
         if (messagesJson.isNullOrBlank()) return emptyList()
         return runCatching { parseMessages(JSONArray(messagesJson)) }.getOrElse { emptyList() }

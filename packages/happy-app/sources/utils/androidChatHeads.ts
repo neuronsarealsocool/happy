@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import type { Message } from '@/sync/typesMessage';
 import type { Session } from '@/sync/storageTypes';
 import { getSessionName } from '@/utils/sessionUtils';
@@ -11,9 +11,32 @@ type HappyChatHeadsModule = {
     showTestChatHead: (title?: string, body?: string, sessionId?: string, avatarUri?: string) => void;
     cacheSession: (sessionId: string, title?: string, avatarUri?: string, messagesJson?: string) => void;
     consumePendingReplies: (sessionId: string) => Promise<string>;
+    getActiveSessionId: () => Promise<string>;
+    addListener: (eventName: string) => void;
+    removeListeners: (count: number) => void;
 };
 
 const nativeModule = NativeModules.HappyChatHeads as HappyChatHeadsModule | undefined;
+const nativeEvents = Platform.OS === 'android' && nativeModule
+    ? new NativeEventEmitter(nativeModule)
+    : null;
+
+export const ANDROID_CHAT_HEAD_OPENED_EVENT = 'HappyChatHeadOpened';
+export const ANDROID_CHAT_HEAD_REPLY_EVENT = 'HappyChatHeadReplyQueued';
+
+export async function getActiveAndroidChatHeadSessionId(): Promise<string> {
+    if (Platform.OS !== 'android' || !nativeModule) {
+        return '';
+    }
+    return (await nativeModule.getActiveSessionId())?.trim() ?? '';
+}
+
+export function addAndroidChatHeadListener(
+    eventName: typeof ANDROID_CHAT_HEAD_OPENED_EVENT | typeof ANDROID_CHAT_HEAD_REPLY_EVENT,
+    listener: (event: { sessionId?: string }) => void
+) {
+    return nativeEvents?.addListener(eventName, listener) ?? null;
+}
 
 export async function canUseAndroidChatHeads(): Promise<boolean> {
     if (Platform.OS !== 'android' || !nativeModule) {
