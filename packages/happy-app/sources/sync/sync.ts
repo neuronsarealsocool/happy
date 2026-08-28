@@ -102,6 +102,8 @@ type SendMessageOptions = {
     source?: MessageSentSource;
     /** Optional image attachments to send before the text message. */
     attachments?: AttachmentPreview[];
+    /** Let a caller flush the outbox directly instead of using the retry queue. */
+    deferFlush?: boolean;
 };
 
 class Sync {
@@ -246,6 +248,14 @@ class Sync {
         this.anonID = encryption.anonID;
         this.serverID = parseToken(credentials.token);
         await this.#init();
+    }
+
+    async restoreForChatHead(credentials: AuthCredentials, encryption: Encryption, sessionId: string) {
+        this.credentials = credentials;
+        this.encryption = encryption;
+        this.anonID = encryption.anonID;
+        this.serverID = parseToken(credentials.token);
+        await this.prepareSessionForMessage(sessionId);
     }
 
     async #init() {
@@ -598,7 +608,7 @@ class Sync {
         }
 
         const modeMeta = resolveMessageModeMeta(session, storage.getState().settings);
-        const { displayText, source = 'chat', attachments } = options ?? {};
+        const { displayText, source = 'chat', attachments, deferFlush = false } = options ?? {};
 
         const flavor = session.metadata?.flavor;
         const rigAttachmentPolicy = isRigMetadataV1(session.metadata)
@@ -755,13 +765,84 @@ class Sync {
         // up on user action only — not on background agent output.
         storage.getState().markSessionMessageSent(sessionId);
 
-        this.getSendSync(sessionId).invalidate();
-        this.maybeStartBackgroundSendWatchdog();
+        if (!deferFlush) {
+            this.getSendSync(sessionId).invalidate();
+            this.maybeStartBackgroundSendWatchdog();
+        }
     }
 
     async sendChatHeadMessage(sessionId: string, text: string) {
-        await this.sendMessage(sessionId, text, { source: 'chat' });
-        await this.getSendSync(sessionId).invalidateAndAwait();
+        await this.prepareSessionForMessage(sessionId);
+        await this.sendMessage(sessionId, text, { source: 'chat', deferFlush: true });
+        await this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
+    }
+
+    private async prepareSessionForMessage(sessionId: string) {
+        if (
+            this.encryption.getSessionEncryption(sessionId)
+            && storage.getState().sessions[sessionId]
+        ) {
+            return;
+        }
+
+        const response = await fetch(`${getServerUrl()}/v1/sessions`, {
+            headers: {
+                'Authorization': `Bearer ${this.credentials.token}`,
+                'Content-Type': 'application/json',
+                'X-Happy-Client': getHappyClientId(),
+            },
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to prepare chat-head session: ${response.status}`);
+        }
+
+        const data = await response.json() as {
+            sessions: Array<{
+                id: string;
+                tag: string;
+                seq: number;
+                metadata: string;
+                metadataVersion: number;
+                agentState: string | null;
+                agentStateVersion: number;
+                dataEncryptionKey: string | null;
+                active: boolean;
+                activeAt: number;
+                createdAt: number;
+                updatedAt: number;
+                lastMessage: ApiMessage | null;
+            }>;
+        };
+        const session = data.sessions.find((candidate) => candidate.id === sessionId);
+        if (!session) {
+            throw new Error(`Chat-head session ${sessionId} was not found`);
+        }
+
+        let dataKey: Uint8Array | null = null;
+        if (session.dataEncryptionKey) {
+            dataKey = await this.encryption.decryptEncryptionKey(session.dataEncryptionKey);
+            if (!dataKey) {
+                throw new Error(`Failed to decrypt chat-head session ${sessionId}`);
+            }
+        }
+        await this.encryption.initializeSessions(new Map([[sessionId, dataKey]]));
+        const sessionEncryption = this.encryption.getSessionEncryption(sessionId);
+        if (!sessionEncryption) {
+            throw new Error(`Chat-head session encryption ${sessionId} was not initialized`);
+        }
+
+        const metadata = await sessionEncryption.decryptMetadata(session.metadataVersion, session.metadata);
+        const agentState = await sessionEncryption.decryptAgentState(
+            session.agentStateVersion,
+            session.agentState,
+        );
+        this.applySessions([{
+            ...session,
+            metadata,
+            agentState,
+            thinking: false,
+            thinkingAt: 0,
+        }]);
     }
 
     /** Server sent us settings — merge any pending local changes on top, then apply as one update. */
@@ -1842,7 +1923,7 @@ class Sync {
         }
     }
 
-    private flushOutbox = async (sessionId: string) => {
+    private flushOutbox = async (sessionId: string, timeoutMs?: number) => {
         const pending = this.pendingOutbox.get(sessionId);
         if (!pending || pending.length === 0) {
             if (!this.hasPendingOutboxMessages()) {
@@ -1855,6 +1936,9 @@ class Sync {
 
         const batch = pending.slice();
         const controller = new AbortController();
+        const timeout = timeoutMs
+            ? setTimeout(() => controller.abort(), timeoutMs)
+            : null;
         this.sendAbortControllers.set(sessionId, controller);
         try {
             const response = await apiSocket.request(`/v3/sessions/${sessionId}/messages`, {
@@ -1890,6 +1974,7 @@ class Sync {
             this.maybeStartBackgroundSendWatchdog();
             throw error;
         } finally {
+            if (timeout) clearTimeout(timeout);
             this.sendAbortControllers.delete(sessionId);
         }
 
@@ -2841,26 +2926,44 @@ export const sync = new Sync();
 // Init sequence
 //
 
-let isInitialized = false;
+let initializationPromise: Promise<void> | null = null;
 export async function syncCreate(credentials: AuthCredentials) {
-    if (isInitialized) {
-        console.warn('Sync already initialized: ignoring');
-        return;
-    }
-    isInitialized = true;
-    await syncInit(credentials, false);
+    await initializeSync(credentials, false);
 }
 
 export async function syncRestore(credentials: AuthCredentials) {
-    if (isInitialized) {
-        console.warn('Sync already initialized: ignoring');
-        return;
-    }
-    isInitialized = true;
-    await syncInit(credentials, true);
+    await initializeSync(credentials, true);
 }
 
-async function syncInit(credentials: AuthCredentials, restore: boolean) {
+export async function syncRestoreForChatHead(credentials: AuthCredentials, sessionId: string) {
+    if (initializationPromise) {
+        await initializationPromise;
+        return;
+    }
+    initializationPromise = syncInit(credentials, true, sessionId);
+    try {
+        await initializationPromise;
+    } catch (error) {
+        initializationPromise = null;
+        throw error;
+    }
+}
+
+async function initializeSync(credentials: AuthCredentials, restore: boolean) {
+    if (initializationPromise) {
+        await initializationPromise;
+        return;
+    }
+    initializationPromise = syncInit(credentials, restore);
+    try {
+        await initializationPromise;
+    } catch (error) {
+        initializationPromise = null;
+        throw error;
+    }
+}
+
+async function syncInit(credentials: AuthCredentials, restore: boolean, chatHeadSessionId?: string) {
 
     // Initialize sync engine
     const secretKey = decodeBase64(credentials.secret, 'base64url');
@@ -2882,7 +2985,9 @@ async function syncInit(credentials: AuthCredentials, restore: boolean) {
     });
 
     // Initialize sessions engine
-    if (restore) {
+    if (chatHeadSessionId) {
+        await sync.restoreForChatHead(credentials, encryption, chatHeadSessionId);
+    } else if (restore) {
         await sync.restore(credentials, encryption);
     } else {
         await sync.create(credentials, encryption);

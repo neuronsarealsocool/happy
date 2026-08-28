@@ -8,38 +8,10 @@ import {
     addAndroidChatHeadListener,
     ANDROID_CHAT_HEAD_OPENED_EVENT,
     ANDROID_CHAT_HEAD_REPLY_EVENT,
-    acknowledgeAndroidChatHeadPendingReply,
     cacheAndroidChatHeadSession,
-    consumeAndroidChatHeadPendingReplies,
     getActiveAndroidChatHeadSessionId,
 } from '@/utils/androidChatHeads';
-
-const drainingSessions = new Set<string>();
-
-async function drainReplies(sessionId: string) {
-    if (!sessionId || drainingSessions.has(sessionId)) {
-        return;
-    }
-    drainingSessions.add(sessionId);
-    try {
-        while (true) {
-            const replies = await consumeAndroidChatHeadPendingReplies(sessionId);
-            if (replies.length === 0) {
-                break;
-            }
-            for (const reply of replies) {
-                await sync.sendChatHeadMessage(sessionId, reply.text);
-                await acknowledgeAndroidChatHeadPendingReply(sessionId, reply.id);
-            }
-            // The native queue is only cleared after each successful send.
-            // Fetch again in case another reply arrived while this batch drained.
-        }
-    } catch (error) {
-        console.warn('[chat-head] Reply send deferred until Happy is ready', error);
-    } finally {
-        drainingSessions.delete(sessionId);
-    }
-}
+import { drainAndroidChatHeadReplies } from '@/utils/androidChatHeadReplyTask';
 
 export function AndroidChatHeadBridge() {
     const [sessionId, setSessionId] = React.useState('');
@@ -57,7 +29,7 @@ export function AndroidChatHeadBridge() {
             if (!cancelled && activeSessionId) {
                 setSessionId(activeSessionId);
                 sync.onSessionVisible(activeSessionId);
-                void drainReplies(activeSessionId);
+                void drainAndroidChatHeadReplies(activeSessionId);
             }
         });
 
@@ -73,7 +45,7 @@ export function AndroidChatHeadBridge() {
             if (nextSessionId) {
                 setSessionId(nextSessionId);
                 sync.onSessionVisible(nextSessionId);
-                void drainReplies(nextSessionId);
+                void drainAndroidChatHeadReplies(nextSessionId);
             }
         });
 

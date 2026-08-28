@@ -99,6 +99,7 @@
     <service android:name=".ChatHeadOverlayService" android:exported="false" android:foregroundServiceType="specialUse">
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="conversation chat head overlay"/>
     </service>
+    <service android:name=".ChatHeadReplyService" android:exported="false"/>
     <service android:name=".HappyFirebaseMessagingService" android:exported="false">
       <intent-filter android:priority="100">
         <action android:name="com.google.firebase.MESSAGING_EVENT"/>

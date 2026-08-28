@@ -342,7 +342,14 @@ class ChatHeadOverlayService : Service() {
         }
         card.addView(inputRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        val replyInput = EditText(this).apply {
+        val replyInput = object : EditText(this) {
+            override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    clearFocus()
+                }
+                return super.onKeyPreIme(keyCode, event)
+            }
+        }.apply {
             hint = "Aa"
             textSize = 16f
             setTextColor(Color.BLACK)
@@ -649,6 +656,10 @@ class ChatHeadOverlayService : Service() {
 
     private fun notifyPendingReply(sessionId: String, attempt: Int = 0) {
         if (!ChatHeadSessionCache.hasPendingReplies(this, sessionId)) return
+        if (attempt == 0) {
+            runCatching { ChatHeadReplyService.start(this, sessionId) }
+                .onFailure { Log.w(TAG, "Failed to start chat-head reply task", it) }
+        }
         ChatHeadModule.emit(this, ChatHeadModule.EVENT_REPLY_QUEUED, sessionId)
         if (attempt < 120) {
             handler.postDelayed({ notifyPendingReply(sessionId, attempt + 1) }, 500)
