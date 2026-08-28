@@ -131,7 +131,7 @@ class ChatHeadOverlayService : Service() {
             return
         }
         removeOverlay()
-        isExpanded = true
+        isExpanded = false
 
         val view = buildOverlay(
             title,
@@ -144,7 +144,8 @@ class ChatHeadOverlayService : Service() {
         currentSessionId = sessionId
         visibleSessionId = sessionId
         currentTranscriptAtBottom = autoScrollToBottom
-        val width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
+        val bubbleSize = dp(78)
+        val bubbleMargin = dp(12)
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -152,15 +153,16 @@ class ChatHeadOverlayService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
         val layoutParams = WindowManager.LayoutParams(
-            width,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            bubbleSize,
+            bubbleSize,
             type,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            x = 0
+            gravity = Gravity.TOP or Gravity.START
+            x = resources.displayMetrics.widthPixels - bubbleSize - bubbleMargin
             y = dp(28)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
@@ -202,7 +204,6 @@ class ChatHeadOverlayService : Service() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, 0, 0, dp(10))
         }
 
         val bubble = FrameLayout(this).apply {
@@ -235,6 +236,7 @@ class ChatHeadOverlayService : Service() {
             background = roundedDrawable(Color.WHITE, dp(24).toFloat())
             elevation = dp(18).toFloat()
             setPadding(dp(18), dp(16), dp(18), dp(14))
+            visibility = View.GONE
         }
         val cardParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         cardParams.topMargin = dp(14)
@@ -434,8 +436,26 @@ class ChatHeadOverlayService : Service() {
         bubble.setOnClickListener {
             isExpanded = !isExpanded
             card.visibility = if (isExpanded) View.VISIBLE else View.GONE
-            overlayView?.let { view ->
-                runCatching { windowManager.updateViewLayout(view, params) }
+            val overlay = overlayView
+            val layout = params
+            if (overlay != null && layout != null) {
+                if (isExpanded) {
+                    layout.width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
+                    layout.height = WindowManager.LayoutParams.WRAP_CONTENT
+                    layout.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    layout.x = 0
+                } else {
+                    replyInput.clearFocus()
+                    (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                        .hideSoftInputFromWindow(replyInput.windowToken, 0)
+                    val bubbleSize = dp(78)
+                    layout.width = bubbleSize
+                    layout.height = bubbleSize
+                    layout.gravity = Gravity.TOP or Gravity.START
+                    layout.x = resources.displayMetrics.widthPixels - bubbleSize - dp(12)
+                }
+                layout.y = dp(28)
+                runCatching { windowManager.updateViewLayout(overlay, layout) }
             }
         }
         replyInput.setOnFocusChangeListener { view, hasFocus ->
