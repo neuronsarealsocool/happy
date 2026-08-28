@@ -59,6 +59,7 @@ class ApiSocket {
     private socket: Socket | null = null;
     private config: SyncSocketConfig | null = null;
     private encryption: Encryption | null = null;
+    private appStateOverride: 'active' | 'background' | null = null;
     private messageHandlers: Map<string, (data: any) => void> = new Map();
     private reconnectedListeners: Set<() => void> = new Set();
     private statusListeners: Set<(status: 'disconnected' | 'connecting' | 'connected' | 'error') => void> = new Set();
@@ -68,10 +69,18 @@ class ApiSocket {
     // Initialization
     //
 
-    initialize(config: SyncSocketConfig, encryption: Encryption) {
+    initialize(
+        config: SyncSocketConfig,
+        encryption: Encryption,
+        connect = true,
+        appStateOverride: 'active' | 'background' | null = null,
+    ) {
         this.config = config;
         this.encryption = encryption;
-        this.connect();
+        this.appStateOverride = appStateOverride;
+        if (connect) {
+            this.connect();
+        }
     }
 
     //
@@ -97,7 +106,7 @@ class ApiSocket {
                 token: this.config!.token,
                 clientType: 'user-scoped' as const,
                 happyClient: getHappyClientId(),
-                appState: getCurrentAppState(),
+                appState: this.appStateOverride ?? getCurrentAppState(),
             }),
             transports: ['websocket'],
             reconnection: true,

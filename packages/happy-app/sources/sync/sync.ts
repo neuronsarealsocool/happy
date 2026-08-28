@@ -773,8 +773,72 @@ class Sync {
 
     async sendChatHeadMessage(sessionId: string, text: string) {
         await this.prepareSessionForMessage(sessionId);
+        await this.resumeChatHeadSessionIfNeeded(sessionId);
         await this.sendMessage(sessionId, text, { source: 'chat', deferFlush: true });
         await this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
+    }
+
+    async refreshChatHeadSession(sessionId: string) {
+        await this.prepareSessionForMessage(sessionId);
+        await this.getMessagesSync(sessionId).invalidateAndAwait();
+    }
+
+    private async resumeChatHeadSessionIfNeeded(sessionId: string) {
+        const session = storage.getState().sessions[sessionId];
+        if (!session || session.metadata?.capabilities?.resume === false) {
+            return;
+        }
+
+        const machineId = session.metadata?.machineId;
+        const hasResumeId = Boolean(session.metadata?.claudeSessionId || session.metadata?.codexThreadId);
+        if (!machineId || !hasResumeId) {
+            return;
+        }
+
+        await this.prepareMachineForChatHead(machineId);
+        const modeMeta = resolveMessageModeMeta(session, storage.getState().settings);
+        const result = await apiSocket.machineRPC<
+            { type: string; errorMessage?: string },
+            { sessionId: string; model?: string; permissionMode?: string }
+        >(machineId, 'resume-happy-session', {
+            sessionId,
+            model: modeMeta.model ?? undefined,
+            permissionMode: modeMeta.permissionMode,
+        });
+        if (result.type !== 'success') {
+            throw new Error(result.errorMessage || `Failed to resume chat-head session ${sessionId}`);
+        }
+    }
+
+    private async prepareMachineForChatHead(machineId: string) {
+        if (this.encryption.getMachineEncryption(machineId)) {
+            return;
+        }
+        const response = await fetch(`${getServerUrl()}/v1/machines`, {
+            headers: {
+                'Authorization': `Bearer ${this.credentials.token}`,
+                'Content-Type': 'application/json',
+                'X-Happy-Client': getHappyClientId(),
+            },
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to prepare chat-head machine: ${response.status}`);
+        }
+        const machines = await response.json() as Array<{
+            id: string;
+            dataEncryptionKey?: string | null;
+        }>;
+        const machine = machines.find((candidate) => candidate.id === machineId);
+        if (!machine) {
+            throw new Error(`Chat-head machine ${machineId} was not found`);
+        }
+        const dataKey = machine.dataEncryptionKey
+            ? await this.encryption.decryptEncryptionKey(machine.dataEncryptionKey)
+            : null;
+        if (machine.dataEncryptionKey && !dataKey) {
+            throw new Error(`Failed to decrypt chat-head machine ${machineId}`);
+        }
+        await this.encryption.initializeMachines(new Map([[machineId, dataKey]]));
     }
 
     private async prepareSessionForMessage(sessionId: string) {
@@ -2977,7 +3041,12 @@ async function syncInit(credentials: AuthCredentials, restore: boolean, chatHead
 
     // Initialize socket connection
     const API_ENDPOINT = getServerUrl();
-    apiSocket.initialize({ endpoint: API_ENDPOINT, token: credentials.token }, encryption);
+    apiSocket.initialize(
+        { endpoint: API_ENDPOINT, token: credentials.token },
+        encryption,
+        true,
+        chatHeadSessionId ? 'background' : null,
+    );
 
     // Wire socket status to storage
     apiSocket.onStatusChange((status) => {

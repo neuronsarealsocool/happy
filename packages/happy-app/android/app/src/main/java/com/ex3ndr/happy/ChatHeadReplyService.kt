@@ -13,6 +13,7 @@ class ChatHeadReplyService : HeadlessJsTaskService() {
 
         val data = Arguments.createMap().apply {
             putString("sessionId", sessionId)
+            putBoolean("refresh", intent?.getBooleanExtra(EXTRA_REFRESH, false) == true)
         }
         return HeadlessJsTaskConfig(
             TASK_KEY,
@@ -25,11 +26,13 @@ class ChatHeadReplyService : HeadlessJsTaskService() {
     companion object {
         private const val TASK_KEY = "HappyChatHeadReplyTask"
         private const val EXTRA_SESSION_ID = "sessionId"
+        private const val EXTRA_REFRESH = "refresh"
 
-        fun start(context: Context, sessionId: String) {
+        fun start(context: Context, sessionId: String, refresh: Boolean = false) {
             if (sessionId.isBlank()) return
             context.startService(Intent(context, ChatHeadReplyService::class.java).apply {
                 putExtra(EXTRA_SESSION_ID, sessionId)
+                putExtra(EXTRA_REFRESH, refresh)
             })
         }
     }

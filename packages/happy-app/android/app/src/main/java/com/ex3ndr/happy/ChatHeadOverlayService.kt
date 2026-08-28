@@ -94,7 +94,14 @@ class ChatHeadOverlayService : Service() {
         val displayTitle = cached?.title?.takeIf { it.isNotBlank() } ?: title
         val displayAvatarUri = cached?.avatarUri?.takeIf { it.isNotBlank() } ?: avatarUri
         val displaySessionId = cached?.sessionId?.takeIf { it.isNotBlank() } ?: requestedSessionId
-        val displayMessages = cached?.messages?.takeIf { it.isNotEmpty() }
+        if (displaySessionId.isNotBlank()) {
+            ChatHeadReplyService.start(this, displaySessionId, refresh = true)
+        }
+        if (isDistinctNotification && displaySessionId.isNotBlank()) {
+            ChatHeadSessionCache.appendIncomingNotification(this, displaySessionId, body)
+        }
+        val latestCached = ChatHeadSessionCache.load(this, displaySessionId) ?: cached
+        val displayMessages = latestCached?.messages?.takeIf { it.isNotEmpty() }
             ?: listOf(ChatHeadMessage(body, outgoing = false))
         val replacingVisibleConversation = overlayView != null && displaySessionId == currentSessionId
         if (replacingVisibleConversation) {
@@ -456,6 +463,7 @@ class ChatHeadOverlayService : Service() {
             val layout = params
             if (overlay != null && layout != null) {
                 if (isExpanded) {
+                    val shouldScrollToBottom = currentUnreadCount > 0 || currentTranscriptAtBottom
                     currentUnreadCount = 0
                     updateUnreadBadge()
                     layout.flags = layout.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
@@ -463,6 +471,14 @@ class ChatHeadOverlayService : Service() {
                     layout.height = WindowManager.LayoutParams.WRAP_CONTENT
                     layout.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                     layout.x = 0
+                    if (shouldScrollToBottom) {
+                        currentTranscriptAtBottom = true
+                        currentTranscriptScrollY = Int.MAX_VALUE
+                        handler.postDelayed({
+                            messagesScroll.fullScroll(View.FOCUS_DOWN)
+                            scrollToBottomButton.visibility = View.GONE
+                        }, 200)
+                    }
                 } else {
                     replyInput.clearFocus()
                     (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)

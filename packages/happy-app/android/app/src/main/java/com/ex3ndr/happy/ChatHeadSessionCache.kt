@@ -140,6 +140,25 @@ object ChatHeadSessionCache {
         return runCatching { JSONArray(raw).length() > 0 }.getOrDefault(false)
     }
 
+    fun appendIncomingNotification(context: Context, sessionId: String, text: String) {
+        val trimmed = text.trim()
+        if (sessionId.isBlank() || trimmed.isBlank()) return
+        val existing = load(context, sessionId) ?: return
+        val last = existing.messages.lastOrNull()
+        if (last != null && !last.outgoing && last.text == trimmed) return
+
+        val messages = JSONArray().apply {
+            (existing.messages + ChatHeadMessage(trimmed.take(1200), outgoing = false)).forEach { message ->
+                put(JSONObject().apply {
+                    put("text", message.text)
+                    put("outgoing", message.outgoing)
+                    put("attachment", message.attachment)
+                })
+            }
+        }
+        save(context, sessionId, existing.title, existing.avatarUri, messages.toString())
+    }
+
     private fun parseMessages(messagesJson: String?): List<ChatHeadMessage> {
         if (messagesJson.isNullOrBlank()) return emptyList()
         return runCatching { parseMessages(JSONArray(messagesJson)) }.getOrElse { emptyList() }
