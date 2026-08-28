@@ -49,6 +49,7 @@ class ChatHeadOverlayService : Service() {
     private var params: WindowManager.LayoutParams? = null
     private var isExpanded = true
     private var currentSessionId = ""
+    private var currentNotificationFingerprint = ""
     private var currentTranscriptScrollY = 0
     private var currentTranscriptAtBottom = true
     private val pendingReplies = mutableMapOf<String, MutableList<ChatHeadMessage>>()
@@ -75,6 +76,12 @@ class ChatHeadOverlayService : Service() {
         }
         val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Happy" }
         val body = intent?.getStringExtra(EXTRA_BODY).orEmpty().ifBlank { "New message" }
+        val notificationFingerprint = notificationFingerprint(title, body)
+        if (isDismissedNotification(this, notificationFingerprint)) {
+            dismiss()
+            return START_NOT_STICKY
+        }
+        currentNotificationFingerprint = notificationFingerprint
         val requestedSessionId = intent?.getStringExtra(EXTRA_SESSION_ID).orEmpty()
         val avatarUri = intent?.getStringExtra(EXTRA_AVATAR_URI).orEmpty()
         val cached = ChatHeadSessionCache.load(this, requestedSessionId)
@@ -271,7 +278,7 @@ class ChatHeadOverlayService : Service() {
         val openButton = iconButton("Open") { openHappy(sessionId) }
         header.addView(openButton, LinearLayout.LayoutParams(dp(46), dp(46)))
 
-        val closeButton = iconButton("X") { dismiss() }
+        val closeButton = iconButton("X") { dismiss(markCurrentNotificationDismissed = true) }
         header.addView(closeButton, LinearLayout.LayoutParams(dp(46), dp(46)))
 
         val messagesColumn = LinearLayout(this).apply {
@@ -360,7 +367,9 @@ class ChatHeadOverlayService : Service() {
             setPadding(dp(16), 0, dp(16), 0)
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                InputType.TYPE_TEXT_VARIATION_LONG_MESSAGE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         }
         inputRow.addView(replyInput, LinearLayout.LayoutParams(0, dp(46), 1f))
@@ -569,7 +578,10 @@ class ChatHeadOverlayService : Service() {
         return Uri.parse(uri.toString())
     }
 
-    private fun dismiss() {
+    private fun dismiss(markCurrentNotificationDismissed: Boolean = false) {
+        if (markCurrentNotificationDismissed && currentNotificationFingerprint.isNotBlank()) {
+            rememberDismissedNotification(this, currentNotificationFingerprint)
+        }
         removeOverlay()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -728,12 +740,21 @@ class ChatHeadOverlayService : Service() {
         const val FOREGROUND_CHANNEL_ID = "happy_chat_heads"
         private const val TAG = "HappyChatHead"
         private const val FOREGROUND_NOTIFICATION_ID = 9031
+        private const val DISMISS_PREFS = "happy_chat_head_dismissals"
+        private const val DISMISSED_FINGERPRINT = "fingerprint"
+        private const val DISMISSED_AT = "dismissedAt"
+        private const val DISMISS_SUPPRESSION_MS = 2 * 60 * 1000L
 
         fun canDrawOverlays(context: Context): Boolean {
             return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context)
         }
 
         fun start(context: Context, title: String?, body: String?, sessionId: String?, avatarUri: String?) {
+            val resolvedTitle = title.orEmpty().ifBlank { "Happy" }
+            val resolvedBody = body.orEmpty().ifBlank { "New message" }
+            if (isDismissedNotification(context, notificationFingerprint(resolvedTitle, resolvedBody))) {
+                return
+            }
             val intent = Intent(context, ChatHeadOverlayService::class.java).apply {
                 putExtra(EXTRA_TITLE, title)
                 putExtra(EXTRA_BODY, body)
@@ -741,6 +762,28 @@ class ChatHeadOverlayService : Service() {
                 putExtra(EXTRA_AVATAR_URI, avatarUri)
             }
             context.startService(intent)
+        }
+
+        private fun notificationFingerprint(title: String, body: String): String {
+            val normalizedTitle = title.trim()
+            val normalizedBody = body.trim()
+            return "${normalizedTitle.length}:$normalizedTitle$normalizedBody"
+        }
+
+        private fun rememberDismissedNotification(context: Context, fingerprint: String) {
+            context.getSharedPreferences(DISMISS_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(DISMISSED_FINGERPRINT, fingerprint)
+                .putLong(DISMISSED_AT, System.currentTimeMillis())
+                .apply()
+        }
+
+        private fun isDismissedNotification(context: Context, fingerprint: String): Boolean {
+            if (fingerprint.isBlank()) return false
+            val preferences = context.getSharedPreferences(DISMISS_PREFS, Context.MODE_PRIVATE)
+            val dismissedAt = preferences.getLong(DISMISSED_AT, 0L)
+            return preferences.getString(DISMISSED_FINGERPRINT, null) == fingerprint &&
+                System.currentTimeMillis() - dismissedAt in 0 until DISMISS_SUPPRESSION_MS
         }
 
         fun activeSessionId(): String = visibleSessionId
