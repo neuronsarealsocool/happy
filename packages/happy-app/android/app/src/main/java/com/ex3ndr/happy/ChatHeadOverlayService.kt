@@ -171,6 +171,7 @@ class ChatHeadOverlayService : Service() {
             bubbleSize,
             type,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
             android.graphics.PixelFormat.TRANSLUCENT
@@ -457,6 +458,7 @@ class ChatHeadOverlayService : Service() {
                 if (isExpanded) {
                     currentUnreadCount = 0
                     updateUnreadBadge()
+                    layout.flags = layout.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
                     layout.width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
                     layout.height = WindowManager.LayoutParams.WRAP_CONTENT
                     layout.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -465,6 +467,7 @@ class ChatHeadOverlayService : Service() {
                     replyInput.clearFocus()
                     (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                         .hideSoftInputFromWindow(replyInput.windowToken, 0)
+                    layout.flags = layout.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     val bubbleSize = dp(78)
                     layout.width = bubbleSize
                     layout.height = bubbleSize
