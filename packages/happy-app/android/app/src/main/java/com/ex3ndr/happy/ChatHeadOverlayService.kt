@@ -1,6 +1,9 @@
 package com.ex3ndr.happy
 
 import android.app.Service
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -15,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.text.util.Linkify
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
@@ -35,6 +39,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationCompat
 import kotlin.math.roundToInt
 
 class ChatHeadOverlayService : Service() {
@@ -47,12 +52,16 @@ class ChatHeadOverlayService : Service() {
     private var currentTranscriptScrollY = 0
     private var currentTranscriptAtBottom = true
     private val pendingReplies = mutableMapOf<String, MutableList<ChatHeadMessage>>()
+    private var messagesColumnView: LinearLayout? = null
+    private var messagesScrollView: ScrollView? = null
+    private var scrollToBottomView: View? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        startAsForegroundService()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -71,32 +80,34 @@ class ChatHeadOverlayService : Service() {
         val cached = ChatHeadSessionCache.load(this, requestedSessionId)
             ?: ChatHeadSessionCache.findByNotification(this, title, body)
             ?: ChatHeadSessionCache.load(this, currentSessionId)
+            ?: ChatHeadSessionCache.mostRecent(this)
         val displayTitle = cached?.title?.takeIf { it.isNotBlank() } ?: title
         val displayAvatarUri = cached?.avatarUri?.takeIf { it.isNotBlank() } ?: avatarUri
         val displaySessionId = cached?.sessionId?.takeIf { it.isNotBlank() } ?: requestedSessionId
         val displayMessages = cached?.messages?.takeIf { it.isNotEmpty() }
             ?: listOf(ChatHeadMessage(body, outgoing = false))
         val replacingVisibleConversation = overlayView != null && displaySessionId == currentSessionId
-        val restoreScrollY = currentTranscriptScrollY
-        val autoScrollToBottom = !replacingVisibleConversation || currentTranscriptAtBottom
-        if (!replacingVisibleConversation) {
-            currentTranscriptScrollY = 0
-            currentTranscriptAtBottom = true
+        if (replacingVisibleConversation) {
+            refreshVisibleSession(displaySessionId)
+            emitSessionEvent(ChatHeadModule.EVENT_OPENED, displaySessionId)
+            return START_NOT_STICKY
         }
+        currentTranscriptScrollY = 0
+        currentTranscriptAtBottom = true
         show(
             displayTitle,
             displaySessionId,
             displayAvatarUri,
             displayMessages,
-            autoScrollToBottom = autoScrollToBottom,
-            restoreScrollY = restoreScrollY
+            autoScrollToBottom = true
         )
         emitSessionEvent(ChatHeadModule.EVENT_OPENED, displaySessionId)
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        dismiss()
+        removeOverlay()
+        stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
@@ -112,7 +123,7 @@ class ChatHeadOverlayService : Service() {
             Log.w(TAG, "Cannot show chat head: overlay permission is not granted")
             return
         }
-        dismiss()
+        removeOverlay()
         isExpanded = true
 
         val view = buildOverlay(
@@ -282,6 +293,8 @@ class ChatHeadOverlayService : Service() {
         card.addView(transcriptFrame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, messagesHeight))
         transcriptFrame.addView(messagesScroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         messagesScroll.addView(messagesColumn, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        messagesColumnView = messagesColumn
+        messagesScrollView = messagesScroll
 
         val scrollToBottomButton = TextView(this).apply {
             text = "\u2193"
@@ -301,6 +314,7 @@ class ChatHeadOverlayService : Service() {
             setMargins(0, 0, dp(10), dp(10))
         }
         transcriptFrame.addView(scrollToBottomButton, scrollButtonParams)
+        scrollToBottomView = scrollToBottomButton
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             messagesScroll.setOnScrollChangeListener { scrollView, _, scrollY, _, _ ->
@@ -311,7 +325,7 @@ class ChatHeadOverlayService : Service() {
             }
         }
         messages.forEach { message ->
-            appendMessageBubble(messagesColumn, message.text, outgoing = message.outgoing)
+            appendMessageBubble(messagesColumn, message, sessionId)
         }
         messagesScroll.post {
             if (autoScrollToBottom) {
@@ -348,7 +362,7 @@ class ChatHeadOverlayService : Service() {
             val reply = replyInput.text?.toString()?.trim().orEmpty()
             if (reply.isNotEmpty()) {
                 val nonce = System.currentTimeMillis().toString()
-                appendMessageBubble(messagesColumn, reply, outgoing = true)
+                appendMessageBubble(messagesColumn, ChatHeadMessage(reply, outgoing = true), sessionId)
                 if (sessionId.isNotBlank()) {
                     pendingReplies.getOrPut(sessionId) { mutableListOf() }
                         .add(ChatHeadMessage(reply, outgoing = true))
@@ -425,9 +439,10 @@ class ChatHeadOverlayService : Service() {
         return root
     }
 
-    private fun appendMessageBubble(container: LinearLayout, textValue: String, outgoing: Boolean) {
+    private fun appendMessageBubble(container: LinearLayout, item: ChatHeadMessage, sessionId: String) {
+        val outgoing = item.outgoing
         val message = TextView(this).apply {
-            text = textValue
+            text = if (item.attachment) "\uD83D\uDCCE ${item.text}" else item.text
             setTextColor(if (outgoing) Color.WHITE else Color.BLACK)
             textSize = 18f
             background = roundedDrawable(
@@ -435,6 +450,13 @@ class ChatHeadOverlayService : Service() {
                 dp(22).toFloat()
             )
             setPadding(dp(18), dp(12), dp(18), dp(12))
+            if (item.attachment) {
+                contentDescription = "Open ${item.text} in full conversation"
+                setOnClickListener { openHappy(sessionId, dismissOverlay = false) }
+            } else if (!outgoing) {
+                Linkify.addLinks(this, Linkify.WEB_URLS)
+                linksClickable = true
+            }
         }
         val messageParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         messageParams.gravity = if (outgoing) Gravity.END else Gravity.START
@@ -541,17 +563,63 @@ class ChatHeadOverlayService : Service() {
     }
 
     private fun dismiss() {
-        val view = overlayView ?: return
+        removeOverlay()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun removeOverlay() {
+        val view = overlayView
         overlayView = null
         params = null
         currentSessionId = ""
         visibleSessionId = ""
         currentTranscriptScrollY = 0
         currentTranscriptAtBottom = true
-        handler.post {
+        messagesColumnView = null
+        messagesScrollView = null
+        scrollToBottomView = null
+        if (view != null) {
             runCatching { windowManager.removeView(view) }
                 .onFailure { Log.w(TAG, "Failed to remove chat head view", it) }
         }
+    }
+
+    private fun startAsForegroundService() {
+        val channelId = FOREGROUND_CHANNEL_ID
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Chat heads",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps an open conversation chat head connected"
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            }
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(channel)
+        }
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.notification_icon)
+            .setContentTitle("Happy chat head active")
+            .setContentText("Tap to open Happy")
+            .setContentIntent(contentIntent)
+            .setOngoing(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .build()
+        startForeground(FOREGROUND_NOTIFICATION_ID, notification)
     }
 
     private fun refreshVisibleSession(sessionId: String) {
@@ -559,20 +627,30 @@ class ChatHeadOverlayService : Service() {
             return
         }
         val cached = ChatHeadSessionCache.load(this, sessionId) ?: return
-        show(
-            cached.title.ifBlank { "Happy" },
-            cached.sessionId,
-            cached.avatarUri,
-            cached.messages,
-            autoScrollToBottom = currentTranscriptAtBottom,
-            restoreScrollY = currentTranscriptScrollY
-        )
+        val column = messagesColumnView ?: return
+        val scroll = messagesScrollView ?: return
+        val wasAtBottom = currentTranscriptAtBottom
+        val savedScrollY = currentTranscriptScrollY
+        val displayMessages = messagesForDisplay(sessionId, cached.messages)
+        column.removeAllViews()
+        displayMessages.forEach { message ->
+            appendMessageBubble(column, message, sessionId)
+        }
+        scroll.post {
+            if (wasAtBottom) {
+                scroll.fullScroll(View.FOCUS_DOWN)
+            } else {
+                scroll.scrollTo(0, savedScrollY)
+                currentTranscriptAtBottom = false
+                scrollToBottomView?.visibility = View.VISIBLE
+            }
+        }
     }
 
     private fun notifyPendingReply(sessionId: String, attempt: Int = 0) {
         if (!ChatHeadSessionCache.hasPendingReplies(this, sessionId)) return
         ChatHeadModule.emit(this, ChatHeadModule.EVENT_REPLY_QUEUED, sessionId)
-        if (attempt < 20) {
+        if (attempt < 120) {
             handler.postDelayed({ notifyPendingReply(sessionId, attempt + 1) }, 500)
         }
     }
@@ -636,7 +714,9 @@ class ChatHeadOverlayService : Service() {
         const val EXTRA_BODY = "body"
         const val EXTRA_SESSION_ID = "sessionId"
         const val EXTRA_AVATAR_URI = "avatarUri"
+        const val FOREGROUND_CHANNEL_ID = "happy_chat_heads"
         private const val TAG = "HappyChatHead"
+        private const val FOREGROUND_NOTIFICATION_ID = 9031
 
         fun canDrawOverlays(context: Context): Boolean {
             return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context)
@@ -655,7 +735,7 @@ class ChatHeadOverlayService : Service() {
         fun activeSessionId(): String = visibleSessionId
 
         fun refresh(context: Context, sessionId: String) {
-            if (sessionId.isBlank()) return
+            if (sessionId.isBlank() || visibleSessionId != sessionId) return
             val intent = Intent(context, ChatHeadOverlayService::class.java).apply {
                 action = ACTION_REFRESH
                 putExtra(EXTRA_SESSION_ID, sessionId)

@@ -11,6 +11,7 @@ type HappyChatHeadsModule = {
     showTestChatHead: (title?: string, body?: string, sessionId?: string, avatarUri?: string) => void;
     cacheSession: (sessionId: string, title?: string, avatarUri?: string, messagesJson?: string) => void;
     consumePendingReplies: (sessionId: string) => Promise<string>;
+    acknowledgePendingReply: (sessionId: string, replyId: string) => Promise<void>;
     getActiveSessionId: () => Promise<string>;
     addListener: (eventName: string) => void;
     removeListeners: (count: number) => void;
@@ -99,6 +100,13 @@ export function cacheAndroidChatHeadSession(
                 const text = message.text.trim();
                 return text ? [{ text, outgoing: false }] : [];
             }
+            if (message.kind === 'tool-call' && message.tool.name === 'file') {
+                const name = typeof message.tool.input?.name === 'string'
+                    ? message.tool.input.name.trim()
+                    : '';
+                const text = name || message.tool.description?.replace(/^Attached (?:file|image):\s*/i, '').trim();
+                return text ? [{ text: `Attachment: ${text}`, outgoing: false, attachment: true }] : [];
+            }
             return [];
         });
 
@@ -163,4 +171,11 @@ export async function consumeAndroidChatHeadPendingReplies(sessionId: string): P
     } catch {
         return [];
     }
+}
+
+export async function acknowledgeAndroidChatHeadPendingReply(sessionId: string, replyId: string): Promise<void> {
+    if (Platform.OS !== 'android' || !nativeModule || !sessionId || !replyId) {
+        return;
+    }
+    await nativeModule.acknowledgePendingReply(sessionId, replyId);
 }

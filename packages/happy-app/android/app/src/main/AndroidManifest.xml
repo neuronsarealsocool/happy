@@ -7,6 +7,7 @@
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -95,7 +96,9 @@
       </intent-filter>
     </service>
     <service android:name="com.swmansion.audioapi.system.MediaNotificationManager$AudioForegroundService" android:stopWithTask="true" android:foregroundServiceType="mediaPlayback"/>
-    <service android:name=".ChatHeadOverlayService" android:exported="false"/>
+    <service android:name=".ChatHeadOverlayService" android:exported="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="conversation chat head overlay"/>
+    </service>
     <service android:name=".HappyFirebaseMessagingService" android:exported="false">
       <intent-filter android:priority="100">
         <action android:name="com.google.firebase.MESSAGING_EVENT"/>

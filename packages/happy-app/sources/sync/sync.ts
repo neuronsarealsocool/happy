@@ -67,6 +67,8 @@ import { readFileBytes } from '@/utils/readFileBytes';
 import { Modal } from '@/modal';
 import { t } from '@/text';
 import { isRigMetadataV1, rigCanUseAttachments, usesControlledSessionUi } from './rig';
+import { cacheAndroidChatHeadSession } from '@/utils/androidChatHeads';
+import { getSessionName } from '@/utils/sessionUtils';
 
 type V3GetSessionMessagesResponse = {
     messages: ApiMessage[];
@@ -755,6 +757,11 @@ class Sync {
 
         this.getSendSync(sessionId).invalidate();
         this.maybeStartBackgroundSendWatchdog();
+    }
+
+    async sendChatHeadMessage(sessionId: string, text: string) {
+        await this.sendMessage(sessionId, text, { source: 'chat' });
+        await this.getSendSync(sessionId).invalidateAndAwait();
     }
 
     /** Server sent us settings — merge any pending local changes on top, then apply as one update. */
@@ -2767,12 +2774,25 @@ class Sync {
 
     private applyMessages = (sessionId: string, messages: NormalizedMessage[]) => {
         const result = storage.getState().applyMessages(sessionId, messages);
+        const state = storage.getState();
         let m: Message[] = [];
         for (let messageId of result.changed) {
-            const message = storage.getState().sessionMessages[sessionId].messagesMap[messageId];
+            const message = state.sessionMessages[sessionId]?.messagesMap[messageId];
             if (message) {
                 m.push(message);
             }
+        }
+        const session = state.sessions[sessionId];
+        const sessionMessages = state.sessionMessages[sessionId]?.messages;
+        if (result.changed.length > 0 && session && sessionMessages) {
+            cacheAndroidChatHeadSession(
+                sessionId,
+                getSessionName(session),
+                state.settings.sessionProfilePictures[sessionId]
+                    ?? state.localSettings.sessionProfilePictures[sessionId]
+                    ?? '',
+                sessionMessages
+            );
         }
         if (m.length > 0) {
             voiceHooks.onMessages(sessionId, m);

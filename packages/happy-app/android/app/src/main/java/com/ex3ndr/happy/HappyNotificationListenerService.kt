@@ -1,6 +1,7 @@
 package com.ex3ndr.happy
 
 import android.app.Notification
+import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import org.json.JSONObject
@@ -8,6 +9,12 @@ import org.json.JSONObject
 class HappyNotificationListenerService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName != packageName) {
+            return
+        }
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            sbn.notification.channelId == ChatHeadOverlayService.FOREGROUND_CHANNEL_ID
+        ) {
             return
         }
 

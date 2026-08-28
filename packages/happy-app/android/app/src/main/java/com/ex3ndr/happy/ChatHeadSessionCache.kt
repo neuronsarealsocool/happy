@@ -6,14 +6,16 @@ import org.json.JSONObject
 
 data class ChatHeadMessage(
     val text: String,
-    val outgoing: Boolean
+    val outgoing: Boolean,
+    val attachment: Boolean = false
 )
 
 data class ChatHeadSessionSnapshot(
     val sessionId: String,
     val title: String,
     val avatarUri: String,
-    val messages: List<ChatHeadMessage>
+    val messages: List<ChatHeadMessage>,
+    val updatedAt: Long
 )
 
 object ChatHeadSessionCache {
@@ -45,6 +47,7 @@ object ChatHeadSessionCache {
                     put(JSONObject().apply {
                         put("text", message.text)
                         put("outgoing", message.outgoing)
+                        put("attachment", message.attachment)
                     })
                 }
             })
@@ -83,6 +86,15 @@ object ChatHeadSessionCache {
             ?.first
     }
 
+    fun mostRecent(context: Context): ChatHeadSessionSnapshot? {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .all
+            .asSequence()
+            .filter { (key, value) -> key.startsWith(KEY_PREFIX) && value is String }
+            .mapNotNull { (_, value) -> parseSnapshot(value as String, null) }
+            .maxByOrNull { it.updatedAt }
+    }
+
     fun enqueuePendingReply(context: Context, sessionId: String, text: String, nonce: String) {
         val trimmed = text.trim()
         if (sessionId.isBlank() || trimmed.isBlank()) return
@@ -98,13 +110,26 @@ object ChatHeadSessionCache {
         prefs.edit().putString(key, pending.toString()).apply()
     }
 
-    fun consumePendingReplies(context: Context, sessionId: String): String {
+    fun pendingReplies(context: Context, sessionId: String): String {
         if (sessionId.isBlank()) return "[]"
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val key = PENDING_REPLY_PREFIX + sessionId
-        val raw = prefs.getString(key, "[]") ?: "[]"
-        prefs.edit().remove(key).apply()
-        return raw
+        return prefs.getString(key, "[]") ?: "[]"
+    }
+
+    fun acknowledgePendingReply(context: Context, sessionId: String, replyId: String) {
+        if (sessionId.isBlank() || replyId.isBlank()) return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val key = PENDING_REPLY_PREFIX + sessionId
+        val pending = runCatching { JSONArray(prefs.getString(key, "[]")) }.getOrElse { JSONArray() }
+        val remaining = JSONArray()
+        for (index in 0 until pending.length()) {
+            val item = pending.optJSONObject(index) ?: continue
+            if (item.optString("id") != replyId) {
+                remaining.put(item)
+            }
+        }
+        prefs.edit().putString(key, remaining.toString()).apply()
     }
 
     fun hasPendingReplies(context: Context, sessionId: String): Boolean {
@@ -130,7 +155,8 @@ object ChatHeadSessionCache {
             result.add(
                 ChatHeadMessage(
                     text = text.take(1200),
-                    outgoing = item.optBoolean("outgoing", false)
+                    outgoing = item.optBoolean("outgoing", false),
+                    attachment = item.optBoolean("attachment", false)
                 )
             )
         }
@@ -144,7 +170,8 @@ object ChatHeadSessionCache {
                 sessionId = payload.optString("sessionId", fallbackSessionId.orEmpty()),
                 title = payload.optString("title"),
                 avatarUri = payload.optString("avatarUri"),
-                messages = parseMessages(payload.optJSONArray("messages"))
+                messages = parseMessages(payload.optJSONArray("messages")),
+                updatedAt = payload.optLong("updatedAt", 0L)
             )
         }.getOrNull()
     }

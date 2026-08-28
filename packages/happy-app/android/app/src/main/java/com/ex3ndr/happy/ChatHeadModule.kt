@@ -66,7 +66,13 @@ class ChatHeadModule(private val reactContext: ReactApplicationContext) : ReactC
 
     @ReactMethod
     fun consumePendingReplies(sessionId: String, promise: Promise) {
-        promise.resolve(ChatHeadSessionCache.consumePendingReplies(reactContext, sessionId))
+        promise.resolve(ChatHeadSessionCache.pendingReplies(reactContext, sessionId))
+    }
+
+    @ReactMethod
+    fun acknowledgePendingReply(sessionId: String, replyId: String, promise: Promise) {
+        ChatHeadSessionCache.acknowledgePendingReply(reactContext, sessionId, replyId)
+        promise.resolve(null)
     }
 
     @ReactMethod

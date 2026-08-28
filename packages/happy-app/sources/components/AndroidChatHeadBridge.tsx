@@ -8,6 +8,7 @@ import {
     addAndroidChatHeadListener,
     ANDROID_CHAT_HEAD_OPENED_EVENT,
     ANDROID_CHAT_HEAD_REPLY_EVENT,
+    acknowledgeAndroidChatHeadPendingReply,
     cacheAndroidChatHeadSession,
     consumeAndroidChatHeadPendingReplies,
     getActiveAndroidChatHeadSessionId,
@@ -27,9 +28,14 @@ async function drainReplies(sessionId: string) {
                 break;
             }
             for (const reply of replies) {
-                await sync.sendMessage(sessionId, reply.text, { source: 'chat' });
+                await sync.sendChatHeadMessage(sessionId, reply.text);
+                await acknowledgeAndroidChatHeadPendingReply(sessionId, reply.id);
             }
+            // The native queue is only cleared after each successful send.
+            // Fetch again in case another reply arrived while this batch drained.
         }
+    } catch (error) {
+        console.warn('[chat-head] Reply send deferred until Happy is ready', error);
     } finally {
         drainingSessions.delete(sessionId);
     }
