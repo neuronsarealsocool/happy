@@ -50,12 +50,14 @@ class ChatHeadOverlayService : Service() {
     private var isExpanded = true
     private var currentSessionId = ""
     private var currentNotificationFingerprint = ""
+    private var currentUnreadCount = 0
     private var currentTranscriptScrollY = 0
     private var currentTranscriptAtBottom = true
     private val pendingReplies = mutableMapOf<String, MutableList<ChatHeadMessage>>()
     private var messagesColumnView: LinearLayout? = null
     private var messagesScrollView: ScrollView? = null
     private var scrollToBottomView: View? = null
+    private var unreadBadgeView: TextView? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -81,7 +83,8 @@ class ChatHeadOverlayService : Service() {
             dismiss()
             return START_NOT_STICKY
         }
-        currentNotificationFingerprint = notificationFingerprint
+        val isDistinctNotification = notificationFingerprint != currentNotificationFingerprint
+        val suppliedNotificationCount = intent?.getIntExtra(EXTRA_NOTIFICATION_COUNT, 0) ?: 0
         val requestedSessionId = intent?.getStringExtra(EXTRA_SESSION_ID).orEmpty()
         val avatarUri = intent?.getStringExtra(EXTRA_AVATAR_URI).orEmpty()
         val cached = ChatHeadSessionCache.load(this, requestedSessionId)
@@ -95,12 +98,23 @@ class ChatHeadOverlayService : Service() {
             ?: listOf(ChatHeadMessage(body, outgoing = false))
         val replacingVisibleConversation = overlayView != null && displaySessionId == currentSessionId
         if (replacingVisibleConversation) {
+            if (!isExpanded && isDistinctNotification) {
+                currentUnreadCount = if (suppliedNotificationCount > 0) {
+                    suppliedNotificationCount
+                } else {
+                    currentUnreadCount + 1
+                }
+                updateUnreadBadge()
+            }
+            currentNotificationFingerprint = notificationFingerprint
             refreshVisibleSession(displaySessionId)
             emitSessionEvent(ChatHeadModule.EVENT_OPENED, displaySessionId)
             return START_NOT_STICKY
         }
         currentTranscriptScrollY = 0
         currentTranscriptAtBottom = true
+        currentNotificationFingerprint = notificationFingerprint
+        currentUnreadCount = suppliedNotificationCount.takeIf { it > 0 } ?: 1
         show(
             displayTitle,
             displaySessionId,
@@ -207,7 +221,7 @@ class ChatHeadOverlayService : Service() {
         }
 
         val bubble = FrameLayout(this).apply {
-            background = circleDrawable(Color.WHITE)
+            setBackgroundColor(Color.TRANSPARENT)
             elevation = dp(12).toFloat()
             outlineProvider = circleOutlineProvider(dp(78))
             clipToOutline = true
@@ -219,16 +233,17 @@ class ChatHeadOverlayService : Service() {
             setImageResource(R.mipmap.ic_launcher_round)
             setAvatarImage(this, avatarUri)
         }
-        bubble.addView(avatar, FrameLayout.LayoutParams(dp(58), dp(58), Gravity.CENTER))
+        bubble.addView(avatar, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
 
         val badge = TextView(this).apply {
-            text = "1"
             setTextColor(Color.WHITE)
             textSize = 14f
             gravity = Gravity.CENTER
             typeface = Typeface.DEFAULT_BOLD
             background = circleDrawable(Color.rgb(255, 45, 85))
         }
+        unreadBadgeView = badge
+        updateUnreadBadge()
         bubble.addView(badge, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP or Gravity.END))
 
         val card = LinearLayout(this).apply {
@@ -440,6 +455,8 @@ class ChatHeadOverlayService : Service() {
             val layout = params
             if (overlay != null && layout != null) {
                 if (isExpanded) {
+                    currentUnreadCount = 0
+                    updateUnreadBadge()
                     layout.width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
                     layout.height = WindowManager.LayoutParams.WRAP_CONTENT
                     layout.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -618,9 +635,22 @@ class ChatHeadOverlayService : Service() {
         messagesColumnView = null
         messagesScrollView = null
         scrollToBottomView = null
+        unreadBadgeView = null
         if (view != null) {
             runCatching { windowManager.removeView(view) }
                 .onFailure { Log.w(TAG, "Failed to remove chat head view", it) }
+        }
+    }
+
+    private fun updateUnreadBadge() {
+        unreadBadgeView?.apply {
+            text = when {
+                currentUnreadCount > 99 -> "99+"
+                currentUnreadCount > 0 -> currentUnreadCount.toString()
+                else -> ""
+            }
+            textSize = if (currentUnreadCount > 99) 10f else 14f
+            visibility = if (currentUnreadCount > 0) View.VISIBLE else View.GONE
         }
     }
 
@@ -757,6 +787,7 @@ class ChatHeadOverlayService : Service() {
         const val EXTRA_BODY = "body"
         const val EXTRA_SESSION_ID = "sessionId"
         const val EXTRA_AVATAR_URI = "avatarUri"
+        const val EXTRA_NOTIFICATION_COUNT = "notificationCount"
         const val FOREGROUND_CHANNEL_ID = "happy_chat_heads"
         private const val TAG = "HappyChatHead"
         private const val FOREGROUND_NOTIFICATION_ID = 9031
@@ -769,7 +800,14 @@ class ChatHeadOverlayService : Service() {
             return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context)
         }
 
-        fun start(context: Context, title: String?, body: String?, sessionId: String?, avatarUri: String?) {
+        fun start(
+            context: Context,
+            title: String?,
+            body: String?,
+            sessionId: String?,
+            avatarUri: String?,
+            notificationCount: Int = 0
+        ) {
             val resolvedTitle = title.orEmpty().ifBlank { "Happy" }
             val resolvedBody = body.orEmpty().ifBlank { "New message" }
             if (isDismissedNotification(context, notificationFingerprint(resolvedTitle, resolvedBody))) {
@@ -780,6 +818,7 @@ class ChatHeadOverlayService : Service() {
                 putExtra(EXTRA_BODY, body)
                 putExtra(EXTRA_SESSION_ID, sessionId)
                 putExtra(EXTRA_AVATAR_URI, avatarUri)
+                putExtra(EXTRA_NOTIFICATION_COUNT, notificationCount)
             }
             context.startService(intent)
         }

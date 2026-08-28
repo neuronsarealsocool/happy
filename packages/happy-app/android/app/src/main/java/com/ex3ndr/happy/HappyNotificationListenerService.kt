@@ -29,7 +29,8 @@ class HappyNotificationListenerService : NotificationListenerService() {
             title,
             body,
             sessionId,
-            null
+            null,
+            sbn.notification.number
         )
     }
 

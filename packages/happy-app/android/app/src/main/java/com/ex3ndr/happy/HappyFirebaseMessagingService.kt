@@ -21,7 +21,10 @@ class HappyFirebaseMessagingService : ExpoFirebaseMessagingService() {
             ?: "New message"
         val sessionId = data["sessionId"] ?: data["session_id"] ?: data["conversationId"]
         val avatarUri = data["avatarUri"] ?: data["avatarUrl"] ?: data["profilePicture"]
+        val notificationCount = (data["badge"] ?: data["count"] ?: data["notificationCount"])
+            ?.toIntOrNull()
+            ?: 0
 
-        ChatHeadOverlayService.start(applicationContext, title, body, sessionId, avatarUri)
+        ChatHeadOverlayService.start(applicationContext, title, body, sessionId, avatarUri, notificationCount)
     }
 }
