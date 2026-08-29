@@ -772,10 +772,20 @@ class Sync {
     }
 
     async sendChatHeadMessage(sessionId: string, text: string) {
+        const startedAt = Date.now();
         await this.prepareSessionForMessage(sessionId);
-        await this.resumeChatHeadSessionIfNeeded(sessionId);
+        console.warn(`[chat-head] ${sessionId}: prepared in ${Date.now() - startedAt}ms`);
+
+        // Put the outgoing message into the shared session state before any
+        // potentially slow machine resume or network delivery work.
         await this.sendMessage(sessionId, text, { source: 'chat', deferFlush: true });
+        console.warn(`[chat-head] ${sessionId}: queued locally in ${Date.now() - startedAt}ms`);
+
+        await this.resumeChatHeadSessionIfNeeded(sessionId);
+        console.warn(`[chat-head] ${sessionId}: agent ready in ${Date.now() - startedAt}ms`);
+
         await this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
+        console.warn(`[chat-head] ${sessionId}: delivered in ${Date.now() - startedAt}ms`);
     }
 
     async refreshChatHeadSession(sessionId: string) {
