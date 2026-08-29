@@ -781,11 +781,12 @@ class Sync {
         await this.sendMessage(sessionId, text, { source: 'chat', deferFlush: true });
         console.warn(`[chat-head] ${sessionId}: queued locally in ${Date.now() - startedAt}ms`);
 
-        await this.resumeChatHeadSessionIfNeeded(sessionId);
-        console.warn(`[chat-head] ${sessionId}: agent ready in ${Date.now() - startedAt}ms`);
-
-        await this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
-        console.warn(`[chat-head] ${sessionId}: delivered in ${Date.now() - startedAt}ms`);
+        // An idle conversation may need its desktop agent restarted. Upload the
+        // message at the same time so process startup does not delay delivery.
+        const resumePromise = this.resumeChatHeadSessionIfNeeded(sessionId);
+        const deliveryPromise = this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
+        await Promise.all([resumePromise, deliveryPromise]);
+        console.warn(`[chat-head] ${sessionId}: agent ready and delivered in ${Date.now() - startedAt}ms`);
     }
 
     async refreshChatHeadSession(sessionId: string) {
