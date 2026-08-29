@@ -1,5 +1,8 @@
 package com.ex3ndr.happy
 
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Service
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -29,6 +32,7 @@ import android.view.ViewOutlineProvider
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.OvershootInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -58,6 +62,10 @@ class ChatHeadOverlayService : Service() {
     private var messagesScrollView: ScrollView? = null
     private var scrollToBottomView: View? = null
     private var unreadBadgeView: TextView? = null
+    private val onlineDotViews = mutableListOf<View>()
+    private var statusTextView: TextView? = null
+    private var workingAnimator: AnimatorSet? = null
+    private var localWorkingStartedAt = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -127,6 +135,7 @@ class ChatHeadOverlayService : Service() {
             displaySessionId,
             displayAvatarUri,
             displayMessages,
+            latestCached?.isWorking == true,
             autoScrollToBottom = true
         )
         emitSessionEvent(ChatHeadModule.EVENT_OPENED, displaySessionId)
@@ -144,6 +153,7 @@ class ChatHeadOverlayService : Service() {
         sessionId: String,
         avatarUri: String,
         messages: List<ChatHeadMessage>,
+        isWorking: Boolean,
         autoScrollToBottom: Boolean,
         restoreScrollY: Int = 0
     ) {
@@ -159,6 +169,7 @@ class ChatHeadOverlayService : Service() {
             sessionId,
             avatarUri,
             messagesForDisplay(sessionId, messages),
+            isWorking,
             autoScrollToBottom,
             restoreScrollY
         )
@@ -220,6 +231,7 @@ class ChatHeadOverlayService : Service() {
         sessionId: String,
         avatarUri: String,
         messages: List<ChatHeadMessage>,
+        isWorking: Boolean,
         autoScrollToBottom: Boolean,
         restoreScrollY: Int
     ): View {
@@ -242,6 +254,18 @@ class ChatHeadOverlayService : Service() {
             setAvatarImage(this, avatarUri)
         }
         bubble.addView(avatar, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
+
+        val bubbleOnlineDot = View(this).apply {
+            background = onlineDotDrawable()
+            contentDescription = "Conversation online"
+        }
+        onlineDotViews.add(bubbleOnlineDot)
+        bubble.addView(
+            bubbleOnlineDot,
+            FrameLayout.LayoutParams(dp(20), dp(20), Gravity.BOTTOM or Gravity.END).apply {
+                setMargins(0, 0, dp(2), dp(2))
+            }
+        )
 
         val badge = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -271,6 +295,7 @@ class ChatHeadOverlayService : Service() {
         }
         card.addView(header, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
+        val smallAvatarFrame = FrameLayout(this)
         val smallAvatar = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setImageResource(R.mipmap.ic_launcher_round)
@@ -278,7 +303,17 @@ class ChatHeadOverlayService : Service() {
             clipToOutline = true
             setAvatarImage(this, avatarUri)
         }
-        header.addView(smallAvatar, LinearLayout.LayoutParams(dp(52), dp(52)))
+        smallAvatarFrame.addView(smallAvatar, FrameLayout.LayoutParams(dp(52), dp(52)))
+        val headerOnlineDot = View(this).apply {
+            background = onlineDotDrawable()
+            contentDescription = "Conversation online"
+        }
+        onlineDotViews.add(headerOnlineDot)
+        smallAvatarFrame.addView(
+            headerOnlineDot,
+            FrameLayout.LayoutParams(dp(16), dp(16), Gravity.BOTTOM or Gravity.END)
+        )
+        header.addView(smallAvatarFrame, LinearLayout.LayoutParams(dp(52), dp(52)))
 
         val titleColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -293,12 +328,15 @@ class ChatHeadOverlayService : Service() {
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
         })
-        titleColumn.addView(TextView(this).apply {
+        val statusText = TextView(this).apply {
             text = "Active now"
             setTextColor(Color.rgb(120, 120, 128))
             textSize = 15f
             maxLines = 1
-        })
+        }
+        statusTextView = statusText
+        titleColumn.addView(statusText)
+        updateWorkingStatus(isWorking)
 
         val openButton = iconButton("Open") { openHappy(sessionId) }
         header.addView(openButton, LinearLayout.LayoutParams(dp(46), dp(46)))
@@ -405,6 +443,10 @@ class ChatHeadOverlayService : Service() {
                 val nonce = System.currentTimeMillis().toString()
                 appendMessageBubble(messagesColumn, ChatHeadMessage(reply, outgoing = true), sessionId)
                 if (sessionId.isNotBlank()) {
+                    localWorkingStartedAt = System.currentTimeMillis()
+                    ChatHeadSessionCache.setWorking(this, sessionId, true)
+                    updateWorkingStatus(true)
+                    handler.postDelayed({ refreshVisibleSession(sessionId) }, LOCAL_WORKING_GRACE_MS)
                     pendingReplies.getOrPut(sessionId) { mutableListOf() }
                         .add(ChatHeadMessage(reply, outgoing = true))
                     ChatHeadSessionCache.enqueuePendingReply(this, sessionId, reply, nonce)
@@ -655,6 +697,11 @@ class ChatHeadOverlayService : Service() {
         messagesScrollView = null
         scrollToBottomView = null
         unreadBadgeView = null
+        workingAnimator?.cancel()
+        workingAnimator = null
+        onlineDotViews.clear()
+        statusTextView = null
+        localWorkingStartedAt = 0L
         if (view != null) {
             runCatching { windowManager.removeView(view) }
                 .onFailure { Log.w(TAG, "Failed to remove chat head view", it) }
@@ -670,6 +717,38 @@ class ChatHeadOverlayService : Service() {
             }
             textSize = if (currentUnreadCount > 99) 10f else 14f
             visibility = if (currentUnreadCount > 0) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun updateWorkingStatus(isWorking: Boolean) {
+        statusTextView?.text = if (isWorking) "Working..." else "Active now"
+        workingAnimator?.cancel()
+        workingAnimator = null
+        onlineDotViews.forEach { dot ->
+            dot.alpha = 1f
+            dot.contentDescription = if (isWorking) "Working on your message" else "Conversation online"
+        }
+        if (!isWorking || onlineDotViews.isEmpty()) return
+
+        val animators = onlineDotViews.map { dot ->
+            ObjectAnimator.ofFloat(dot, View.ALPHA, 1f, 0.28f).apply {
+                duration = 800L
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                interpolator = AccelerateDecelerateInterpolator()
+            }
+        }
+        workingAnimator = AnimatorSet().apply {
+            playTogether(animators)
+            start()
+        }
+    }
+
+    private fun onlineDotDrawable(): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.rgb(49, 195, 67))
+            setStroke(dp(2), Color.WHITE)
         }
     }
 
@@ -720,6 +799,12 @@ class ChatHeadOverlayService : Service() {
         val wasAtBottom = currentTranscriptAtBottom
         val savedScrollY = currentTranscriptScrollY
         val displayMessages = messagesForDisplay(sessionId, cached.messages)
+        val keepLocalWorking = localWorkingStartedAt > 0L &&
+            System.currentTimeMillis() - localWorkingStartedAt < LOCAL_WORKING_GRACE_MS
+        updateWorkingStatus(cached.isWorking || keepLocalWorking)
+        if (cached.isWorking) {
+            localWorkingStartedAt = 0L
+        }
         column.removeAllViews()
         displayMessages.forEach { message ->
             appendMessageBubble(column, message, sessionId)
@@ -809,6 +894,7 @@ class ChatHeadOverlayService : Service() {
         const val EXTRA_NOTIFICATION_COUNT = "notificationCount"
         const val FOREGROUND_CHANNEL_ID = "happy_chat_heads"
         private const val TAG = "HappyChatHead"
+        private const val LOCAL_WORKING_GRACE_MS = 3_000L
         private const val FOREGROUND_NOTIFICATION_ID = 9031
         private const val DISMISS_PREFS = "happy_chat_head_dismissals"
         private const val DISMISSED_FINGERPRINT = "fingerprint"

@@ -789,6 +789,12 @@ class Sync {
             return;
         }
 
+        // Active chat heads already have a live agent connection. Resuming them
+        // adds a machine RPC before every message and makes replies feel slower.
+        if (session.presence === 'online') {
+            return;
+        }
+
         const machineId = session.metadata?.machineId;
         const hasResumeId = Boolean(session.metadata?.claudeSessionId || session.metadata?.codexThreadId);
         if (!machineId || !hasResumeId) {
@@ -2940,7 +2946,8 @@ class Sync {
                 state.settings.sessionProfilePictures[sessionId]
                     ?? state.localSettings.sessionProfilePictures[sessionId]
                     ?? '',
-                sessionMessages
+                sessionMessages,
+                session.thinking,
             );
         }
         if (m.length > 0) {
