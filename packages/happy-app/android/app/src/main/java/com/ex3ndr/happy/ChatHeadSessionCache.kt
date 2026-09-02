@@ -15,7 +15,6 @@ data class ChatHeadSessionSnapshot(
     val title: String,
     val avatarUri: String,
     val messages: List<ChatHeadMessage>,
-    val isWorking: Boolean,
     val updatedAt: Long
 )
 
@@ -29,8 +28,7 @@ object ChatHeadSessionCache {
         sessionId: String,
         title: String?,
         avatarUri: String?,
-        messagesJson: String?,
-        isWorking: Boolean? = null
+        messagesJson: String?
     ) {
         if (sessionId.isBlank()) return
 
@@ -44,7 +42,6 @@ object ChatHeadSessionCache {
             put("sessionId", sessionId)
             put("title", title?.takeIf { it.isNotBlank() } ?: existing?.title.orEmpty())
             put("avatarUri", avatarUri?.takeIf { it.isNotBlank() } ?: existing?.avatarUri.orEmpty())
-            put("isWorking", isWorking ?: existing?.isWorking ?: false)
             put("messages", JSONArray().apply {
                 messages.forEach { message ->
                     put(JSONObject().apply {
@@ -159,12 +156,7 @@ object ChatHeadSessionCache {
                 })
             }
         }
-        save(context, sessionId, existing.title, existing.avatarUri, messages.toString(), existing.isWorking)
-    }
-
-    fun setWorking(context: Context, sessionId: String, isWorking: Boolean) {
-        val existing = load(context, sessionId) ?: return
-        save(context, sessionId, existing.title, existing.avatarUri, null, isWorking)
+        save(context, sessionId, existing.title, existing.avatarUri, messages.toString())
     }
 
     private fun parseMessages(messagesJson: String?): List<ChatHeadMessage> {
@@ -198,7 +190,6 @@ object ChatHeadSessionCache {
                 title = payload.optString("title"),
                 avatarUri = payload.optString("avatarUri"),
                 messages = parseMessages(payload.optJSONArray("messages")),
-                isWorking = payload.optBoolean("isWorking", false),
                 updatedAt = payload.optLong("updatedAt", 0L)
             )
         }.getOrNull()

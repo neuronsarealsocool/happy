@@ -772,21 +772,10 @@ class Sync {
     }
 
     async sendChatHeadMessage(sessionId: string, text: string) {
-        const startedAt = Date.now();
         await this.prepareSessionForMessage(sessionId);
-        console.warn(`[chat-head] ${sessionId}: prepared in ${Date.now() - startedAt}ms`);
-
-        // Put the outgoing message into the shared session state before any
-        // potentially slow machine resume or network delivery work.
+        await this.resumeChatHeadSessionIfNeeded(sessionId);
         await this.sendMessage(sessionId, text, { source: 'chat', deferFlush: true });
-        console.warn(`[chat-head] ${sessionId}: queued locally in ${Date.now() - startedAt}ms`);
-
-        // An idle conversation may need its desktop agent restarted. Upload the
-        // message at the same time so process startup does not delay delivery.
-        const resumePromise = this.resumeChatHeadSessionIfNeeded(sessionId);
-        const deliveryPromise = this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
-        await Promise.all([resumePromise, deliveryPromise]);
-        console.warn(`[chat-head] ${sessionId}: agent ready and delivered in ${Date.now() - startedAt}ms`);
+        await this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
     }
 
     async refreshChatHeadSession(sessionId: string) {
@@ -797,12 +786,6 @@ class Sync {
     private async resumeChatHeadSessionIfNeeded(sessionId: string) {
         const session = storage.getState().sessions[sessionId];
         if (!session || session.metadata?.capabilities?.resume === false) {
-            return;
-        }
-
-        // Active chat heads already have a live agent connection. Resuming them
-        // adds a machine RPC before every message and makes replies feel slower.
-        if (session.presence === 'online') {
             return;
         }
 
@@ -2957,8 +2940,7 @@ class Sync {
                 state.settings.sessionProfilePictures[sessionId]
                     ?? state.localSettings.sessionProfilePictures[sessionId]
                     ?? '',
-                sessionMessages,
-                session.thinking,
+                sessionMessages
             );
         }
         if (m.length > 0) {

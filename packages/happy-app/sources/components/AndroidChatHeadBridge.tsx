@@ -64,8 +64,7 @@ export function AndroidChatHeadBridge() {
             sessionId,
             getSessionName(session),
             profilePicture,
-            messages,
-            session.thinking,
+            messages
         );
     }, [isLoaded, messages, profilePicture, session, sessionId]);
 

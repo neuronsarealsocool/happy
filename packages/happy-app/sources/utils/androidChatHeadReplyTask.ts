@@ -13,60 +13,6 @@ export const ANDROID_CHAT_HEAD_REPLY_TASK = 'HappyChatHeadReplyTask';
 
 const drainingSessions = new Set<string>();
 
-const CHAT_HEAD_RESPONSE_WAIT_MS = 110_000;
-const CHAT_HEAD_REFRESH_INTERVAL_MS = 2_500;
-
-function countVisibleIncomingMessages(sessionId: string): number {
-    return storage.getState().sessionMessages[sessionId]?.messages.filter((message) => (
-        (message.kind === 'agent-text' && !message.isThinking && message.text.trim().length > 0)
-        || (message.kind === 'tool-call' && message.tool.name === 'file')
-    )).length ?? 0;
-}
-
-async function keepChatHeadSyncedThroughResponse(sessionId: string, baselineIncoming: number) {
-    const startedAt = Date.now();
-    const deadline = startedAt + CHAT_HEAD_RESPONSE_WAIT_MS;
-    let nextRefreshAt = startedAt + 1_000;
-    let latestIncoming = baselineIncoming;
-    let latestChangeAt = startedAt;
-    let sawWorking = storage.getState().sessions[sessionId]?.thinking === true;
-
-    while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        const now = Date.now();
-        if (now >= nextRefreshAt) {
-            try {
-                await sync.refreshChatHeadSession(sessionId);
-            } catch (error) {
-                console.warn(`[chat-head] ${sessionId}: response refresh failed`, error);
-            }
-            nextRefreshAt = Date.now() + CHAT_HEAD_REFRESH_INTERVAL_MS;
-        }
-
-        const state = storage.getState();
-        const isWorking = state.sessions[sessionId]?.thinking === true;
-        sawWorking ||= isWorking;
-        const incoming = countVisibleIncomingMessages(sessionId);
-        if (incoming > latestIncoming) {
-            latestIncoming = incoming;
-            latestChangeAt = Date.now();
-        }
-
-        const receivedResponse = incoming > baselineIncoming;
-        if (receivedResponse && sawWorking && !isWorking) {
-            console.warn(`[chat-head] ${sessionId}: complete response synced in ${Date.now() - startedAt}ms`);
-            return;
-        }
-        if (receivedResponse && !sawWorking && Date.now() - latestChangeAt >= 8_000) {
-            console.warn(`[chat-head] ${sessionId}: response synced after quiet period in ${Date.now() - startedAt}ms`);
-            return;
-        }
-    }
-
-    console.warn(`[chat-head] ${sessionId}: response sync wait reached its time limit`);
-}
-
 export async function drainAndroidChatHeadReplies(sessionId: string) {
     if (!sessionId || drainingSessions.has(sessionId)) {
         return;
@@ -84,8 +30,6 @@ export async function drainAndroidChatHeadReplies(sessionId: string) {
         await syncRestoreForChatHead(credentials, sessionId);
         console.warn(`[chat-head] ${sessionId}: targeted sync ready`);
 
-        const baselineIncoming = countVisibleIncomingMessages(sessionId);
-        let sentReply = false;
         while (true) {
             const replies = await consumeAndroidChatHeadPendingReplies(sessionId);
             console.warn(`[chat-head] ${sessionId}: found ${replies.length} pending replies`);
@@ -93,16 +37,11 @@ export async function drainAndroidChatHeadReplies(sessionId: string) {
                 break;
             }
             for (const reply of replies) {
-                sentReply = true;
                 console.warn(`[chat-head] ${sessionId}: sending ${reply.id}`);
                 await sync.sendChatHeadMessage(sessionId, reply.text);
                 console.warn(`[chat-head] ${sessionId}: acknowledging ${reply.id}`);
                 await acknowledgeAndroidChatHeadPendingReply(sessionId, reply.id);
             }
-        }
-
-        if (sentReply) {
-            await keepChatHeadSyncedThroughResponse(sessionId, baselineIncoming);
         }
 
     } finally {
@@ -127,7 +66,6 @@ async function refreshAndroidChatHeadSession(sessionId: string) {
             getSessionName(session),
             '',
             messages,
-            session.thinking,
         );
     }
 }

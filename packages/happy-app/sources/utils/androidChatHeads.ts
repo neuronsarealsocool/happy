@@ -9,7 +9,7 @@ type HappyChatHeadsModule = {
     canReadNotifications: () => Promise<boolean>;
     openNotificationListenerSettings: () => void;
     showTestChatHead: (title?: string, body?: string, sessionId?: string, avatarUri?: string) => void;
-    cacheSession: (sessionId: string, title: string, avatarUri: string, messagesJson: string | undefined, isWorking: boolean) => void;
+    cacheSession: (sessionId: string, title?: string, avatarUri?: string, messagesJson?: string) => void;
     consumePendingReplies: (sessionId: string) => Promise<string>;
     acknowledgePendingReply: (sessionId: string, replyId: string) => Promise<void>;
     getActiveSessionId: () => Promise<string>;
@@ -83,8 +83,7 @@ export function cacheAndroidChatHeadSession(
     sessionId: string,
     title: string,
     avatarUri: string | null | undefined,
-    messages: Message[],
-    isWorking = false,
+    messages: Message[]
 ) {
     if (Platform.OS !== 'android' || !nativeModule || !sessionId) {
         return;
@@ -115,8 +114,7 @@ export function cacheAndroidChatHeadSession(
         sessionId,
         title,
         avatarUri ?? '',
-        JSON.stringify(chatMessages),
-        isWorking,
+        JSON.stringify(chatMessages)
     );
 }
 
@@ -137,8 +135,7 @@ export function cacheAndroidChatHeadSessionSummaries(
             session.id,
             getSessionName(session),
             sessionProfilePictures[session.id] ?? legacySessionProfilePictures[session.id] ?? '',
-            undefined,
-            session.thinking,
+            undefined
         );
     });
 }

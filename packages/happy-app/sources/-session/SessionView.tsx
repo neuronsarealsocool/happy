@@ -33,8 +33,7 @@ import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSession
 import { useSession } from '@/sync/storage';
 import { getSessionForkSource } from '@/utils/sessionFork';
 import { useSessionProfilePicture } from '@/utils/sessionProfilePictures';
-import { cacheAndroidChatHeadSession } from '@/utils/androidChatHeads';
-import { drainAndroidChatHeadReplies } from '@/utils/androidChatHeadReplyTask';
+import { cacheAndroidChatHeadSession, consumeAndroidChatHeadPendingReplies } from '@/utils/androidChatHeads';
 import { useHappyAction } from '@/hooks/useHappyAction';
 import { HappyError } from '@/utils/errors';
 import { Session } from '@/sync/storageTypes';
@@ -1251,7 +1250,18 @@ export function SessionViewLoaded({
         if (!isLoaded) {
             return;
         }
-        void drainAndroidChatHeadReplies(sessionId);
+        let cancelled = false;
+        void consumeAndroidChatHeadPendingReplies(sessionId).then((pendingReplies) => {
+            if (cancelled || pendingReplies.length === 0) {
+                return;
+            }
+            for (const reply of pendingReplies) {
+                void sync.sendMessage(sessionId, reply.text, { source: 'chat' });
+            }
+        });
+        return () => {
+            cancelled = true;
+        };
     }, [isLoaded, sessionId]);
 
     React.useEffect(() => {
@@ -1262,8 +1272,7 @@ export function SessionViewLoaded({
             sessionId,
             getSessionName(session),
             sessionProfilePicture,
-            messages,
-            session.thinking,
+            messages
         );
     }, [isLoaded, messages, session, sessionId, sessionProfilePicture]);
 

@@ -2,7 +2,8 @@ import * as React from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { SessionView } from '@/-session/SessionView';
 import { storage } from '@/sync/storage';
-import { drainAndroidChatHeadReplies } from '@/utils/androidChatHeadReplyTask';
+import { sync } from '@/sync/sync';
+import { consumeAndroidChatHeadPendingReplies } from '@/utils/androidChatHeads';
 
 
 export default React.memo(() => {
@@ -27,7 +28,11 @@ export default React.memo(() => {
         handledChatHeadDraftRef.current = dedupeKey;
 
         if (params.chatHeadSend === '1') {
-            void drainAndroidChatHeadReplies(sessionId);
+            void consumeAndroidChatHeadPendingReplies(sessionId).then((pendingReplies) => {
+                for (const reply of pendingReplies) {
+                    void sync.sendMessage(sessionId, reply.text, { source: 'chat' });
+                }
+            });
             return;
         }
 
