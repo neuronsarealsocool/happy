@@ -66,6 +66,7 @@ async function refreshAndroidChatHeadSession(sessionId: string) {
             getSessionName(session),
             '',
             messages,
+            session.thinking,
         );
     }
 }

@@ -2940,7 +2940,8 @@ class Sync {
                 state.settings.sessionProfilePictures[sessionId]
                     ?? state.localSettings.sessionProfilePictures[sessionId]
                     ?? '',
-                sessionMessages
+                sessionMessages,
+                session.thinking,
             );
         }
         if (m.length > 0) {

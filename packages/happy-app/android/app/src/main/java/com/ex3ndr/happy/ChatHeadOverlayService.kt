@@ -1,5 +1,8 @@
 package com.ex3ndr.happy
 
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Service
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -29,6 +32,7 @@ import android.view.ViewOutlineProvider
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.OvershootInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -58,6 +62,12 @@ class ChatHeadOverlayService : Service() {
     private var messagesScrollView: ScrollView? = null
     private var scrollToBottomView: View? = null
     private var unreadBadgeView: TextView? = null
+    private var workingStatusRow: LinearLayout? = null
+    private var workingStatusDot: View? = null
+    private var workingStatusText: TextView? = null
+    private var workingAnimator: AnimatorSet? = null
+    private var localWorkingStartedAt = 0L
+    private var wasWorking = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -127,6 +137,7 @@ class ChatHeadOverlayService : Service() {
             displaySessionId,
             displayAvatarUri,
             displayMessages,
+            latestCached?.isWorking == true,
             autoScrollToBottom = true
         )
         emitSessionEvent(ChatHeadModule.EVENT_OPENED, displaySessionId)
@@ -144,6 +155,7 @@ class ChatHeadOverlayService : Service() {
         sessionId: String,
         avatarUri: String,
         messages: List<ChatHeadMessage>,
+        isWorking: Boolean,
         autoScrollToBottom: Boolean,
         restoreScrollY: Int = 0
     ) {
@@ -159,6 +171,7 @@ class ChatHeadOverlayService : Service() {
             sessionId,
             avatarUri,
             messagesForDisplay(sessionId, messages),
+            isWorking,
             autoScrollToBottom,
             restoreScrollY
         )
@@ -220,6 +233,7 @@ class ChatHeadOverlayService : Service() {
         sessionId: String,
         avatarUri: String,
         messages: List<ChatHeadMessage>,
+        isWorking: Boolean,
         autoScrollToBottom: Boolean,
         restoreScrollY: Int
     ): View {
@@ -367,6 +381,31 @@ class ChatHeadOverlayService : Service() {
             }
         }
 
+        val statusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            setPadding(dp(8), dp(7), 0, 0)
+        }
+        val statusDot = View(this).apply {
+            background = circleDrawable(Color.rgb(10, 132, 255))
+            contentDescription = "Working on your message"
+        }
+        statusRow.addView(statusDot, LinearLayout.LayoutParams(dp(7), dp(7)))
+        val statusText = TextView(this).apply {
+            setTextColor(Color.rgb(0, 122, 255))
+            textSize = 14f
+            maxLines = 1
+        }
+        statusRow.addView(statusText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+            leftMargin = dp(7)
+        })
+        workingStatusRow = statusRow
+        workingStatusDot = statusDot
+        workingStatusText = statusText
+        card.addView(statusRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        updateWorkingStatus(isWorking)
+
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -405,6 +444,10 @@ class ChatHeadOverlayService : Service() {
                 val nonce = System.currentTimeMillis().toString()
                 appendMessageBubble(messagesColumn, ChatHeadMessage(reply, outgoing = true), sessionId)
                 if (sessionId.isNotBlank()) {
+                    localWorkingStartedAt = System.currentTimeMillis()
+                    ChatHeadSessionCache.setWorking(this, sessionId, true)
+                    updateWorkingStatus(true)
+                    handler.postDelayed({ refreshVisibleSession(sessionId) }, LOCAL_WORKING_GRACE_MS)
                     pendingReplies.getOrPut(sessionId) { mutableListOf() }
                         .add(ChatHeadMessage(reply, outgoing = true))
                     ChatHeadSessionCache.enqueuePendingReply(this, sessionId, reply, nonce)
@@ -655,6 +698,13 @@ class ChatHeadOverlayService : Service() {
         messagesScrollView = null
         scrollToBottomView = null
         unreadBadgeView = null
+        workingAnimator?.cancel()
+        workingAnimator = null
+        workingStatusRow = null
+        workingStatusDot = null
+        workingStatusText = null
+        localWorkingStartedAt = 0L
+        wasWorking = false
         if (view != null) {
             runCatching { windowManager.removeView(view) }
                 .onFailure { Log.w(TAG, "Failed to remove chat head view", it) }
@@ -724,6 +774,12 @@ class ChatHeadOverlayService : Service() {
         displayMessages.forEach { message ->
             appendMessageBubble(column, message, sessionId)
         }
+        val localWorking = localWorkingStartedAt > 0L &&
+            System.currentTimeMillis() - localWorkingStartedAt < LOCAL_WORKING_GRACE_MS
+        updateWorkingStatus(cached.isWorking || localWorking)
+        if (cached.isWorking) {
+            localWorkingStartedAt = 0L
+        }
         scroll.post {
             if (wasAtBottom) {
                 scroll.fullScroll(View.FOCUS_DOWN)
@@ -732,6 +788,41 @@ class ChatHeadOverlayService : Service() {
                 currentTranscriptAtBottom = false
                 scrollToBottomView?.visibility = View.VISIBLE
             }
+        }
+    }
+
+    private fun updateWorkingStatus(isWorking: Boolean) {
+        val row = workingStatusRow ?: return
+        val dot = workingStatusDot
+        val text = workingStatusText
+
+        workingAnimator?.cancel()
+        workingAnimator = null
+        dot?.alpha = 1f
+        text?.alpha = 1f
+
+        if (!isWorking) {
+            row.visibility = View.GONE
+            wasWorking = false
+            return
+        }
+
+        row.visibility = View.VISIBLE
+        if (!wasWorking || text?.text.isNullOrBlank()) {
+            text?.text = VIBING_MESSAGES.random().lowercase() + "\u2026"
+        }
+        wasWorking = true
+
+        dot ?: return
+        val pulse = ObjectAnimator.ofFloat(dot, View.ALPHA, 1f, 0.25f).apply {
+            duration = 800L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            interpolator = AccelerateDecelerateInterpolator()
+        }
+        workingAnimator = AnimatorSet().apply {
+            play(pulse)
+            start()
         }
     }
 
@@ -814,6 +905,23 @@ class ChatHeadOverlayService : Service() {
         private const val DISMISSED_FINGERPRINT = "fingerprint"
         private const val DISMISSED_AT = "dismissedAt"
         private const val DISMISS_SUPPRESSION_MS = 2 * 60 * 1000L
+        private const val LOCAL_WORKING_GRACE_MS = 5_000L
+        private val VIBING_MESSAGES = listOf(
+            "Accomplishing", "Actioning", "Actualizing", "Baking", "Booping", "Brewing",
+            "Calculating", "Cerebrating", "Channelling", "Churning", "Clauding", "Coalescing",
+            "Cogitating", "Computing", "Combobulating", "Concocting", "Conjuring", "Considering",
+            "Contemplating", "Cooking", "Crafting", "Creating", "Crunching", "Deciphering",
+            "Deliberating", "Determining", "Discombobulating", "Divining", "Doing", "Effecting",
+            "Elucidating", "Enchanting", "Envisioning", "Finagling", "Flibbertigibbeting", "Forging",
+            "Forming", "Frolicking", "Generating", "Germinating", "Hatching", "Herding", "Honking",
+            "Ideating", "Imagining", "Incubating", "Inferring", "Manifesting", "Marinating",
+            "Meandering", "Moseying", "Mulling", "Mustering", "Musing", "Noodling", "Percolating",
+            "Perusing", "Philosophising", "Pontificating", "Pondering", "Processing", "Puttering",
+            "Puzzling", "Reticulating", "Ruminating", "Scheming", "Schlepping", "Shimmying",
+            "Simmering", "Smooshing", "Spelunking", "Spinning", "Stewing", "Sussing",
+            "Synthesizing", "Thinking", "Tinkering", "Transmuting", "Unfurling", "Unravelling",
+            "Vibing", "Wandering", "Whirring", "Wibbling", "Wizarding", "Working", "Wrangling"
+        )
 
         fun canDrawOverlays(context: Context): Boolean {
             return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context)

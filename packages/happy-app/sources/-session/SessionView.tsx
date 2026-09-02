@@ -1272,7 +1272,8 @@ export function SessionViewLoaded({
             sessionId,
             getSessionName(session),
             sessionProfilePicture,
-            messages
+            messages,
+            session.thinking,
         );
     }, [isLoaded, messages, session, sessionId, sessionProfilePicture]);
 
