@@ -379,7 +379,7 @@ class ChatHeadOverlayService : Service() {
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             setPadding(0, dp(8), 0, 0)
         }
-        val messagesHeight = (resources.displayMetrics.heightPixels * 0.42f)
+        val messagesHeight = (resources.displayMetrics.heightPixels * 0.50f)
             .roundToInt()
             .coerceAtLeast(dp(180))
             .coerceAtMost(dp(420))
