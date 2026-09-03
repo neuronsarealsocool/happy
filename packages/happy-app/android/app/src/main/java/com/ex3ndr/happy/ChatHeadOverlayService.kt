@@ -465,6 +465,18 @@ class ChatHeadOverlayService : Service() {
         }
         card.addView(inputRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
+        val attachButton = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_add)
+            contentDescription = "Attach file"
+            background = circleDrawable(Color.rgb(239, 240, 244))
+            setColorFilter(ContextCompat.getColor(context, android.R.color.holo_blue_light))
+            setPadding(dp(11), dp(11), dp(11), dp(11))
+            setOnClickListener { ChatHeadFilePickerActivity.open(context, sessionId) }
+        }
+        inputRow.addView(attachButton, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+            rightMargin = dp(8)
+        })
+
         val replyInput = object : EditText(this) {
             override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
                 if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {

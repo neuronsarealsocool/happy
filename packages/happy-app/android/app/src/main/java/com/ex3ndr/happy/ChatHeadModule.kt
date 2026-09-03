@@ -76,6 +76,17 @@ class ChatHeadModule(private val reactContext: ReactApplicationContext) : ReactC
     }
 
     @ReactMethod
+    fun consumePendingAttachments(sessionId: String, promise: Promise) {
+        promise.resolve(ChatHeadSessionCache.pendingAttachments(reactContext, sessionId))
+    }
+
+    @ReactMethod
+    fun acknowledgePendingAttachment(sessionId: String, attachmentId: String, promise: Promise) {
+        ChatHeadSessionCache.acknowledgePendingAttachment(reactContext, sessionId, attachmentId)
+        promise.resolve(null)
+    }
+
+    @ReactMethod
     fun getActiveSessionId(promise: Promise) {
         promise.resolve(ChatHeadOverlayService.activeSessionId())
     }

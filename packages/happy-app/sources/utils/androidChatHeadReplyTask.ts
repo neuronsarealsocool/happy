@@ -5,7 +5,9 @@ import { storage } from '@/sync/storage';
 import { getSessionName } from '@/utils/sessionUtils';
 import {
     acknowledgeAndroidChatHeadPendingReply,
+    acknowledgeAndroidChatHeadPendingAttachment,
     cacheAndroidChatHeadSession,
+    consumeAndroidChatHeadPendingAttachments,
     consumeAndroidChatHeadPendingReplies,
 } from '@/utils/androidChatHeads';
 
@@ -32,9 +34,17 @@ export async function drainAndroidChatHeadReplies(sessionId: string) {
 
         while (true) {
             const replies = await consumeAndroidChatHeadPendingReplies(sessionId);
+            const attachments = await consumeAndroidChatHeadPendingAttachments(sessionId);
             console.warn(`[chat-head] ${sessionId}: found ${replies.length} pending replies`);
-            if (replies.length === 0) {
+            if (replies.length === 0 && attachments.length === 0) {
                 break;
+            }
+            if (attachments.length > 0) {
+                console.warn(`[chat-head] ${sessionId}: sending ${attachments.length} attachment(s)`);
+                await sync.sendChatHeadMessage(sessionId, '', attachments);
+                for (const attachment of attachments) {
+                    await acknowledgeAndroidChatHeadPendingAttachment(sessionId, attachment.id);
+                }
             }
             for (const reply of replies) {
                 console.warn(`[chat-head] ${sessionId}: sending ${reply.id}`);

@@ -110,7 +110,7 @@ interface AgentInputProps {
     isSending?: boolean;
     minHeight?: number;
     zenMode?: boolean;
-    /** Image attachments waiting to be sent (expImageUpload feature). */
+    /** Attachments waiting to be sent. */
     selectedImages?: AttachmentPreview[];
     onPickImages?: () => void;
     onRemoveImage?: (id: string) => void;
@@ -1377,7 +1377,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                 })}
                             >
                                 <Ionicons
-                                    name="image-outline"
+                                    name="attach-outline"
                                     size={16}
                                     color={(props.selectedImages?.length ?? 0) > 0
                                         ? theme.colors.radio.active
@@ -2003,7 +2003,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                 hitSlop={6}
                                 style={styles.mobileIconButton}
                                 accessibilityRole="button"
-                                accessibilityLabel="Add photo"
+                                accessibilityLabel="Add file"
                             >
                                 <Ionicons
                                     name="add"

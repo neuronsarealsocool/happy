@@ -63,6 +63,7 @@ const sessionFileEventSchema = z.object({
     ref: z.string(),
     name: z.string(),
     size: z.number(),
+    mimeType: z.string().optional(),
     image: z.object({
         width: z.number(),
         height: z.number(),
@@ -733,6 +734,7 @@ function normalizeSessionEnvelope(
                         ref: envelope.ev.ref,
                         name: envelope.ev.name,
                         size: envelope.ev.size,
+                        mimeType: envelope.ev.mimeType,
                         ...maybeImageMetadata
                     },
                     description: envelope.ev.image

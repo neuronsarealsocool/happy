@@ -22,6 +22,7 @@ export type UploadedAttachment = {
     ref: string;
     name: string;
     size: number;
+    mimeType: string;
     width: number;
     height: number;
     thumbhash?: string;

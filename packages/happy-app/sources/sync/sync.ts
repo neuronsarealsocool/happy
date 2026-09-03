@@ -100,7 +100,7 @@ type OutboxMessage = {
 type SendMessageOptions = {
     displayText?: string;
     source?: MessageSentSource;
-    /** Optional image attachments to send before the text message. */
+    /** Optional file attachments to send before the text message. */
     attachments?: AttachmentPreview[];
     /** Let a caller flush the outbox directly instead of using the retry queue. */
     deferFlush?: boolean;
@@ -516,7 +516,7 @@ class Sync {
     }
 
     /**
-     * Upload image attachments for a session: read bytes → encrypt → upload to server.
+     * Upload file attachments for a session: read bytes → encrypt → upload to server.
      * Returns UploadedAttachment records to embed as file events before the text message.
      * Failures are logged and skipped rather than aborting the whole message send.
      */
@@ -554,6 +554,7 @@ class Sync {
                     ref,
                     name: attachment.name,
                     size: attachment.size,
+                    mimeType: attachment.mimeType,
                     width: attachment.width,
                     height: attachment.height,
                     thumbhash: attachment.thumbhash,
@@ -561,13 +562,13 @@ class Sync {
             } catch (err) {
                 const diagnostic = getAttachmentDiagnostic(err);
                 if (diagnostic) {
-                    console.error('[attachments] Failed to upload image attachment:', formatAttachmentDiagnosticForLog(diagnostic, {
+                    console.error('[attachments] Failed to upload attachment:', formatAttachmentDiagnosticForLog(diagnostic, {
                         platform: Platform.OS,
                         client: getHappyClientId(),
                     }));
                 } else {
                     const message = errorMessageFromUnknown(err);
-                    console.error('[attachments] Failed to upload image attachment:', {
+                    console.error('[attachments] Failed to upload attachment:', {
                         leg: 'blob-upload',
                         message,
                         platform: Platform.OS,
@@ -674,6 +675,7 @@ class Sync {
                                     ref: att.ref,
                                     name: att.name,
                                     size: att.size,
+                                    mimeType: att.mimeType,
                                     // Include image metadata when we have dimensions; thumbhash is
                                     // optional. The native iOS picker can't generate a thumbhash
                                     // without Canvas, so requiring it here would reduce the chat
@@ -771,10 +773,10 @@ class Sync {
         }
     }
 
-    async sendChatHeadMessage(sessionId: string, text: string) {
+    async sendChatHeadMessage(sessionId: string, text: string, attachments?: AttachmentPreview[]) {
         await this.prepareSessionForMessage(sessionId);
         await this.resumeChatHeadSessionIfNeeded(sessionId);
-        await this.sendMessage(sessionId, text, { source: 'chat', deferFlush: true });
+        await this.sendMessage(sessionId, text, { source: 'chat', attachments, deferFlush: true });
         await this.flushOutbox(sessionId, Sync.BACKGROUND_SEND_TIMEOUT_MS);
     }
 

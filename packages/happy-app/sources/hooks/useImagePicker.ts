@@ -11,6 +11,7 @@
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Platform } from 'react-native';
 import { Modal } from '@/modal';
@@ -27,6 +28,7 @@ export type { AttachmentPreview };
 type UseImagePickerResult = {
     selectedImages: AttachmentPreview[];
     pickImages: () => Promise<void>;
+    pickFiles: () => Promise<void>;
     removeImage: (id: string) => void;
     clearImages: () => void;
     addImages: (images: AttachmentPreview[]) => void;
@@ -158,6 +160,51 @@ export function useImagePicker(): UseImagePickerResult {
         }
     }, [requestPermission]);
 
+    const pickFiles = useCallback(async () => {
+        const remaining = MAX_IMAGES_PER_MESSAGE - selectedCountRef.current;
+        if (remaining <= 0) {
+            Modal.alert(
+                t('imageUpload.limitTitle'),
+                t('imageUpload.limitMessage', { max: MAX_IMAGES_PER_MESSAGE }),
+                [{ text: t('common.ok') }],
+            );
+            return;
+        }
+
+        const result = await DocumentPicker.getDocumentAsync({
+            type: '*/*',
+            multiple: true,
+            copyToCacheDirectory: true,
+        });
+        if (result.canceled) return;
+
+        const previews: AttachmentPreview[] = [];
+        for (const asset of result.assets.slice(0, remaining)) {
+            const size = asset.size ?? 0;
+            if (size > MAX_FILE_SIZE) {
+                Modal.alert(
+                    t('imageUpload.fileTooLargeTitle'),
+                    t('imageUpload.fileTooLargeMessage', { name: asset.name, maxMb: 10 }),
+                    [{ text: t('common.ok') }],
+                );
+                continue;
+            }
+            previews.push({
+                id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                uri: asset.uri,
+                width: 0,
+                height: 0,
+                mimeType: asset.mimeType ?? 'application/octet-stream',
+                size,
+                name: asset.name || `attachment_${Date.now()}`,
+            });
+        }
+
+        if (previews.length > 0) {
+            setSelectedImages(prev => [...prev, ...previews].slice(0, MAX_IMAGES_PER_MESSAGE));
+        }
+    }, []);
+
     const removeImage = useCallback((id: string) => {
         setSelectedImages(prev => prev.filter(img => img.id !== id));
     }, []);
@@ -174,5 +221,5 @@ export function useImagePicker(): UseImagePickerResult {
         });
     }, []);
 
-    return { selectedImages, pickImages, removeImage, clearImages, addImages };
+    return { selectedImages, pickImages, pickFiles, removeImage, clearImages, addImages };
 }

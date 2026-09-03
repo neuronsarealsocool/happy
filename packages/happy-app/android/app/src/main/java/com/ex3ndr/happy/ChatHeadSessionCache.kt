@@ -19,10 +19,20 @@ data class ChatHeadSessionSnapshot(
     val updatedAt: Long
 )
 
+data class ChatHeadPendingAttachment(
+    val id: String,
+    val uri: String,
+    val name: String,
+    val mimeType: String,
+    val size: Long,
+    val createdAt: Long
+)
+
 object ChatHeadSessionCache {
     private const val PREFS_NAME = "happy_chat_head_sessions"
     private const val KEY_PREFIX = "session:"
     private const val PENDING_REPLY_PREFIX = "pending-replies:"
+    private const val PENDING_ATTACHMENT_PREFIX = "pending-attachments:"
 
     fun save(
         context: Context,
@@ -141,6 +151,72 @@ object ChatHeadSessionCache {
             .getString(PENDING_REPLY_PREFIX + sessionId, null)
             ?: return false
         return runCatching { JSONArray(raw).length() > 0 }.getOrDefault(false)
+    }
+
+    fun enqueuePendingAttachment(
+        context: Context,
+        sessionId: String,
+        uri: String,
+        name: String,
+        mimeType: String,
+        size: Long,
+        nonce: String
+    ) {
+        if (sessionId.isBlank() || uri.isBlank() || name.isBlank()) return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val key = PENDING_ATTACHMENT_PREFIX + sessionId
+        val pending = runCatching { JSONArray(prefs.getString(key, "[]")) }.getOrElse { JSONArray() }
+        pending.put(JSONObject().apply {
+            put("id", nonce)
+            put("uri", uri)
+            put("name", name)
+            put("mimeType", mimeType)
+            put("size", size)
+            put("createdAt", System.currentTimeMillis())
+        })
+        prefs.edit().putString(key, pending.toString()).apply()
+    }
+
+    fun pendingAttachments(context: Context, sessionId: String): String {
+        if (sessionId.isBlank()) return "[]"
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PENDING_ATTACHMENT_PREFIX + sessionId, "[]") ?: "[]"
+    }
+
+    fun acknowledgePendingAttachment(context: Context, sessionId: String, attachmentId: String) {
+        if (sessionId.isBlank() || attachmentId.isBlank()) return
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val key = PENDING_ATTACHMENT_PREFIX + sessionId
+        val pending = runCatching { JSONArray(prefs.getString(key, "[]")) }.getOrElse { JSONArray() }
+        val remaining = JSONArray()
+        var consumedUri = ""
+        for (index in 0 until pending.length()) {
+            val item = pending.optJSONObject(index) ?: continue
+            if (item.optString("id") == attachmentId) {
+                consumedUri = item.optString("uri")
+            } else {
+                remaining.put(item)
+            }
+        }
+        prefs.edit().putString(key, remaining.toString()).apply()
+        runCatching {
+            val path = android.net.Uri.parse(consumedUri).path
+            if (!path.isNullOrBlank()) java.io.File(path).delete()
+        }
+    }
+
+    fun appendOutgoingAttachment(context: Context, sessionId: String, name: String) {
+        val existing = load(context, sessionId) ?: return
+        val messages = JSONArray().apply {
+            (existing.messages + ChatHeadMessage(name, outgoing = true, attachment = true)).forEach { message ->
+                put(JSONObject().apply {
+                    put("text", message.text)
+                    put("outgoing", message.outgoing)
+                    put("attachment", message.attachment)
+                })
+            }
+        }
+        save(context, sessionId, existing.title, existing.avatarUri, messages.toString(), existing.isWorking)
     }
 
     fun appendIncomingNotification(context: Context, sessionId: String, text: String) {

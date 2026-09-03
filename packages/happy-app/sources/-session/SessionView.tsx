@@ -1016,9 +1016,9 @@ export function SessionViewLoaded({
     const resumeCommandBlock = getResumeCommandBlock(session);
     const attemptedAutoResumeRef = React.useRef<string | null>(null);
 
-    // Image attachment state (expImageUpload feature flag)
-    const expImageUpload = useSetting('expImageUpload');
-    const { selectedImages, pickImages, removeImage, clearImages, addImages } = useImagePicker();
+    // Existing conversations always expose attachments in this fork.
+    const expImageUpload = true;
+    const { selectedImages, pickFiles, removeImage, clearImages, addImages } = useImagePicker();
     const canUseAttachments = rigCanUseAttachments(session.metadata);
     React.useEffect(() => {
         if (!canUseAttachments && selectedImages.length > 0) {
@@ -1287,7 +1287,7 @@ export function SessionViewLoaded({
         });
         const unregisterAttach = registerShortcutHandler('composer.attach', () => {
             if (expImageUpload) {
-                pickImages();
+                pickFiles();
             }
         });
         const unregisterStop = registerShortcutHandler('session.stop', () => {
@@ -1310,7 +1310,7 @@ export function SessionViewLoaded({
             unregisterStop();
             unregisterCopyLatest();
         };
-    }, [expImageUpload, handleAbort, isDisconnected, messages, pickImages, registerShortcutHandler, session.metadata?.path, sessionId, sessionStatus.state, togglePreviewTarget]);
+    }, [expImageUpload, handleAbort, isDisconnected, messages, pickFiles, registerShortcutHandler, session.metadata?.path, sessionId, sessionStatus.state, togglePreviewTarget]);
 
     React.useEffect(() => {
         if (!canResume || resumingSession || attemptedAutoResumeRef.current === sessionId) {
@@ -1383,7 +1383,7 @@ export function SessionViewLoaded({
                 : sessionStatus.state === 'thinking')}
             onFileViewerPress={experiments && !isTablet && rigCanBrowseFiles(session.metadata) && rigCanReadFiles(session.metadata) ? handleFileViewerPress : undefined}
             selectedImages={expImageUpload && canUseAttachments ? selectedImages : undefined}
-            onPickImages={expImageUpload && canUseAttachments ? pickImages : undefined}
+            onPickImages={expImageUpload && canUseAttachments ? pickFiles : undefined}
             onRemoveImage={expImageUpload && canUseAttachments ? removeImage : undefined}
             onAddImages={expImageUpload && canUseAttachments ? addImages : undefined}
             autocompletePrefixes={AGENT_INPUT_AUTOCOMPLETE_PREFIXES}

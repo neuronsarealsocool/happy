@@ -2,6 +2,7 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import type { Message } from '@/sync/typesMessage';
 import type { Session } from '@/sync/storageTypes';
 import { getSessionName } from '@/utils/sessionUtils';
+import type { AttachmentPreview } from '@/sync/attachmentTypes';
 
 type HappyChatHeadsModule = {
     canDrawOverlays: () => Promise<boolean>;
@@ -12,6 +13,8 @@ type HappyChatHeadsModule = {
     cacheSession: (sessionId: string, title: string, avatarUri: string, messagesJson: string | undefined, isWorking: boolean) => void;
     consumePendingReplies: (sessionId: string) => Promise<string>;
     acknowledgePendingReply: (sessionId: string, replyId: string) => Promise<void>;
+    consumePendingAttachments: (sessionId: string) => Promise<string>;
+    acknowledgePendingAttachment: (sessionId: string, attachmentId: string) => Promise<void>;
     getActiveSessionId: () => Promise<string>;
     addListener: (eventName: string) => void;
     removeListeners: (count: number) => void;
@@ -181,4 +184,39 @@ export async function acknowledgeAndroidChatHeadPendingReply(sessionId: string, 
         return;
     }
     await nativeModule.acknowledgePendingReply(sessionId, replyId);
+}
+
+export type AndroidChatHeadPendingAttachment = AttachmentPreview & {
+    createdAt: number;
+};
+
+export async function consumeAndroidChatHeadPendingAttachments(sessionId: string): Promise<AndroidChatHeadPendingAttachment[]> {
+    if (Platform.OS !== 'android' || !nativeModule || !sessionId) return [];
+    try {
+        const parsed = JSON.parse(await nativeModule.consumePendingAttachments(sessionId));
+        if (!Array.isArray(parsed)) return [];
+        return parsed.flatMap((item) => {
+            const id = typeof item?.id === 'string' ? item.id : '';
+            const uri = typeof item?.uri === 'string' ? item.uri : '';
+            const name = typeof item?.name === 'string' ? item.name : '';
+            if (!id || !uri || !name) return [];
+            return [{
+                id,
+                uri,
+                name,
+                mimeType: typeof item?.mimeType === 'string' ? item.mimeType : 'application/octet-stream',
+                size: typeof item?.size === 'number' ? item.size : 0,
+                width: 0,
+                height: 0,
+                createdAt: typeof item?.createdAt === 'number' ? item.createdAt : Date.now(),
+            }];
+        });
+    } catch {
+        return [];
+    }
+}
+
+export async function acknowledgeAndroidChatHeadPendingAttachment(sessionId: string, attachmentId: string): Promise<void> {
+    if (Platform.OS !== 'android' || !nativeModule || !sessionId || !attachmentId) return;
+    await nativeModule.acknowledgePendingAttachment(sessionId, attachmentId);
 }
