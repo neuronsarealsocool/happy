@@ -178,8 +178,8 @@ class ChatHeadOverlayService : Service() {
         currentSessionId = sessionId
         visibleSessionId = sessionId
         currentTranscriptAtBottom = autoScrollToBottom
-        val bubbleSize = dp(78)
-        val bubbleMargin = dp(12)
+        val bubbleSize = dp(MINIMIZED_BUBBLE_SIZE_DP)
+        val bubbleMargin = dp(MINIMIZED_BUBBLE_MARGIN_DP)
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -245,17 +245,26 @@ class ChatHeadOverlayService : Service() {
         val bubble = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
             elevation = dp(12).toFloat()
-            outlineProvider = circleOutlineProvider(dp(78))
-            clipToOutline = true
+            clipChildren = false
+            clipToPadding = false
         }
-        root.addView(bubble, LinearLayout.LayoutParams(dp(78), dp(78)))
+        root.addView(bubble, LinearLayout.LayoutParams(
+            dp(MINIMIZED_BUBBLE_SIZE_DP),
+            dp(MINIMIZED_BUBBLE_SIZE_DP)
+        ))
 
         val avatar = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setImageResource(R.mipmap.ic_launcher_round)
             setAvatarImage(this, avatarUri)
+            outlineProvider = circleOutlineProvider(dp(MINIMIZED_AVATAR_SIZE_DP))
+            clipToOutline = true
         }
-        bubble.addView(avatar, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
+        bubble.addView(avatar, FrameLayout.LayoutParams(
+            dp(MINIMIZED_AVATAR_SIZE_DP),
+            dp(MINIMIZED_AVATAR_SIZE_DP),
+            Gravity.BOTTOM or Gravity.END
+        ))
 
         val badge = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -266,7 +275,11 @@ class ChatHeadOverlayService : Service() {
         }
         unreadBadgeView = badge
         updateUnreadBadge()
-        bubble.addView(badge, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP or Gravity.END))
+        bubble.addView(badge, FrameLayout.LayoutParams(
+            dp(MINIMIZED_BADGE_SIZE_DP),
+            dp(MINIMIZED_BADGE_SIZE_DP),
+            Gravity.TOP or Gravity.START
+        ))
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -527,11 +540,11 @@ class ChatHeadOverlayService : Service() {
                     (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                         .hideSoftInputFromWindow(replyInput.windowToken, 0)
                     layout.flags = layout.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    val bubbleSize = dp(78)
+                    val bubbleSize = dp(MINIMIZED_BUBBLE_SIZE_DP)
                     layout.width = bubbleSize
                     layout.height = bubbleSize
                     layout.gravity = Gravity.TOP or Gravity.START
-                    layout.x = resources.displayMetrics.widthPixels - bubbleSize - dp(12)
+                    layout.x = resources.displayMetrics.widthPixels - bubbleSize - dp(MINIMIZED_BUBBLE_MARGIN_DP)
                 }
                 layout.y = dp(28)
                 runCatching { windowManager.updateViewLayout(overlay, layout) }
@@ -905,6 +918,10 @@ class ChatHeadOverlayService : Service() {
         private const val DISMISSED_FINGERPRINT = "fingerprint"
         private const val DISMISSED_AT = "dismissedAt"
         private const val DISMISS_SUPPRESSION_MS = 2 * 60 * 1000L
+        private const val MINIMIZED_AVATAR_SIZE_DP = 60
+        private const val MINIMIZED_BADGE_SIZE_DP = 22
+        private const val MINIMIZED_BUBBLE_SIZE_DP = 68
+        private const val MINIMIZED_BUBBLE_MARGIN_DP = 4
         private const val LOCAL_WORKING_GRACE_MS = 5_000L
         private val VIBING_MESSAGES = listOf(
             "Accomplishing", "Actioning", "Actualizing", "Baking", "Booping", "Brewing",
