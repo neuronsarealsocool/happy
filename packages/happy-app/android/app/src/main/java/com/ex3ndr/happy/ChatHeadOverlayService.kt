@@ -7,8 +7,10 @@ import android.app.Service
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Outline
@@ -28,6 +30,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewOutlineProvider
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -44,6 +47,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 class ChatHeadOverlayService : Service() {
@@ -68,12 +72,33 @@ class ChatHeadOverlayService : Service() {
     private var workingAnimator: AnimatorSet? = null
     private var localWorkingStartedAt = 0L
     private var wasWorking = false
+    private var minimizeOverlayAction: (() -> Unit)? = null
+    private var dismissTargetView: View? = null
+    private var dismissTargetParams: WindowManager.LayoutParams? = null
+    private var homeReceiverRegistered = false
+
+    private val homeKeyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_CLOSE_SYSTEM_DIALOGS &&
+                intent.getStringExtra(SYSTEM_DIALOG_REASON) == SYSTEM_DIALOG_REASON_HOME_KEY
+            ) {
+                minimizeExpandedOverlay()
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        ContextCompat.registerReceiver(
+            this,
+            homeKeyReceiver,
+            IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS),
+            ContextCompat.RECEIVER_EXPORTED
+        )
+        homeReceiverRegistered = true
         startAsForegroundService()
     }
 
@@ -146,6 +171,10 @@ class ChatHeadOverlayService : Service() {
 
     override fun onDestroy() {
         removeOverlay()
+        if (homeReceiverRegistered) {
+            runCatching { unregisterReceiver(homeKeyReceiver) }
+            homeReceiverRegistered = false
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
@@ -237,7 +266,17 @@ class ChatHeadOverlayService : Service() {
         autoScrollToBottom: Boolean,
         restoreScrollY: Int
     ): View {
-        val root = LinearLayout(this).apply {
+        val root = object : LinearLayout(this) {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                if (event.keyCode == KeyEvent.KEYCODE_BACK && isExpanded) {
+                    if (event.action == KeyEvent.ACTION_UP) {
+                        minimizeExpandedOverlay()
+                    }
+                    return true
+                }
+                return super.dispatchKeyEvent(event)
+            }
+        }.apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
@@ -429,7 +468,11 @@ class ChatHeadOverlayService : Service() {
         val replyInput = object : EditText(this) {
             override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
                 if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                    clearFocus()
+                    minimizeExpandedOverlay()
+                    return true
+                }
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
+                    return true
                 }
                 return super.onKeyPreIme(keyCode, event)
             }
@@ -510,41 +553,55 @@ class ChatHeadOverlayService : Service() {
         }
         card.addView(openComposer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
-        installDrag(bubble)
-        installDrag(header)
-        bubble.setOnClickListener {
-            isExpanded = !isExpanded
-            card.visibility = if (isExpanded) View.VISIBLE else View.GONE
-            val overlay = overlayView
-            val layout = params
-            if (overlay != null && layout != null) {
-                if (isExpanded) {
-                    val shouldScrollToBottom = currentUnreadCount > 0 || currentTranscriptAtBottom
-                    currentUnreadCount = 0
-                    updateUnreadBadge()
-                    layout.flags = layout.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-                    layout.width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
-                    layout.height = WindowManager.LayoutParams.WRAP_CONTENT
-                    layout.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    layout.x = 0
-                    if (shouldScrollToBottom) {
-                        currentTranscriptAtBottom = true
-                        currentTranscriptScrollY = Int.MAX_VALUE
-                        handler.postDelayed({
-                            messagesScroll.fullScroll(View.FOCUS_DOWN)
-                            scrollToBottomButton.visibility = View.GONE
-                        }, 200)
-                    }
-                } else {
-                    replyInput.clearFocus()
-                    (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-                        .hideSoftInputFromWindow(replyInput.windowToken, 0)
+        minimizeOverlayAction = {
+            if (isExpanded) {
+                isExpanded = false
+                card.visibility = View.GONE
+                replyInput.clearFocus()
+                (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .hideSoftInputFromWindow(replyInput.windowToken, 0)
+                val overlay = overlayView
+                val layout = params
+                if (overlay != null && layout != null) {
                     layout.flags = layout.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     val bubbleSize = dp(MINIMIZED_BUBBLE_SIZE_DP)
                     layout.width = bubbleSize
                     layout.height = bubbleSize
                     layout.gravity = Gravity.TOP or Gravity.START
                     layout.x = resources.displayMetrics.widthPixels - bubbleSize - dp(MINIMIZED_BUBBLE_MARGIN_DP)
+                    layout.y = dp(28)
+                    runCatching { windowManager.updateViewLayout(overlay, layout) }
+                }
+            }
+        }
+
+        installDrag(bubble, dismissibleWhenMinimized = true)
+        installDrag(header, dismissibleWhenMinimized = false)
+        bubble.setOnClickListener {
+            if (isExpanded) {
+                minimizeExpandedOverlay()
+                return@setOnClickListener
+            }
+            isExpanded = true
+            card.visibility = View.VISIBLE
+            val overlay = overlayView
+            val layout = params
+            if (overlay != null && layout != null) {
+                val shouldScrollToBottom = currentUnreadCount > 0 || currentTranscriptAtBottom
+                currentUnreadCount = 0
+                updateUnreadBadge()
+                layout.flags = layout.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                layout.width = (resources.displayMetrics.widthPixels * 0.92f).roundToInt()
+                layout.height = WindowManager.LayoutParams.WRAP_CONTENT
+                layout.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                layout.x = 0
+                if (shouldScrollToBottom) {
+                    currentTranscriptAtBottom = true
+                    currentTranscriptScrollY = Int.MAX_VALUE
+                    handler.postDelayed({
+                        messagesScroll.fullScroll(View.FOCUS_DOWN)
+                        scrollToBottomButton.visibility = View.GONE
+                    }, 200)
                 }
                 layout.y = dp(28)
                 runCatching { windowManager.updateViewLayout(overlay, layout) }
@@ -616,11 +673,18 @@ class ChatHeadOverlayService : Service() {
             .onFailure { Log.w(TAG, "Failed to load chat head avatar URI", it) }
     }
 
-    private fun installDrag(view: View) {
+    private fun minimizeExpandedOverlay() {
+        minimizeOverlayAction?.invoke()
+    }
+
+    private fun installDrag(view: View, dismissibleWhenMinimized: Boolean) {
         var startX = 0
         var startY = 0
         var touchX = 0f
         var touchY = 0f
+        var moved = false
+        var overDismissTarget = false
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
         view.setOnTouchListener { _, event ->
             val p = params ?: return@setOnTouchListener false
             when (event.actionMasked) {
@@ -629,18 +693,155 @@ class ChatHeadOverlayService : Service() {
                     startY = p.y
                     touchX = event.rawX
                     touchY = event.rawY
-                    false
+                    moved = false
+                    overDismissTarget = false
+                    true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    p.x = startX + (event.rawX - touchX).roundToInt()
-                    p.y = (startY + (event.rawY - touchY).roundToInt()).coerceAtLeast(0)
-                    overlayView?.let { overlay ->
-                        runCatching { windowManager.updateViewLayout(overlay, p) }
+                    val deltaX = event.rawX - touchX
+                    val deltaY = event.rawY - touchY
+                    if (!moved && hypot(deltaX.toDouble(), deltaY.toDouble()) >= touchSlop) {
+                        moved = true
+                        if (dismissibleWhenMinimized && !isExpanded) {
+                            showDismissTarget()
+                        }
+                    }
+                    if (moved) {
+                        p.x = startX + deltaX.roundToInt()
+                        p.y = (startY + deltaY.roundToInt()).coerceIn(
+                            0,
+                            (resources.displayMetrics.heightPixels - p.height).coerceAtLeast(0)
+                        )
+                        overlayView?.let { overlay ->
+                            runCatching { windowManager.updateViewLayout(overlay, p) }
+                        }
+                        if (dismissibleWhenMinimized && !isExpanded) {
+                            overDismissTarget = isOverDismissTarget(p)
+                            updateDismissTargetState(overDismissTarget)
+                        }
                     }
                     true
                 }
-                else -> false
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) {
+                        view.performClick()
+                    } else if (dismissibleWhenMinimized && !isExpanded && overDismissTarget) {
+                        hideDismissTarget()
+                        overlayView?.animate()
+                            ?.alpha(0f)
+                            ?.scaleX(0.35f)
+                            ?.scaleY(0.35f)
+                            ?.setDuration(180)
+                            ?.withEndAction { dismiss(markCurrentNotificationDismissed = true) }
+                            ?.start()
+                    } else {
+                        hideDismissTarget()
+                        snapMinimizedBubbleToEdge(p)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    hideDismissTarget()
+                    overlayView?.apply {
+                        alpha = 1f
+                        scaleX = 1f
+                        scaleY = 1f
+                    }
+                    true
+                }
+                else -> true
             }
+        }
+    }
+
+    private fun showDismissTarget() {
+        if (dismissTargetView != null) return
+        val size = dp(DISMISS_TARGET_SIZE_DP)
+        val target = TextView(this).apply {
+            text = "\u00d7"
+            textSize = 34f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = circleDrawable(Color.rgb(255, 59, 48))
+            alpha = 0f
+            scaleX = 0.75f
+            scaleY = 0.75f
+            elevation = dp(16).toFloat()
+            contentDescription = "Drag here to close chat head"
+        }
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        val targetParams = WindowManager.LayoutParams(
+            size,
+            size,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (resources.displayMetrics.widthPixels - size) / 2
+            y = resources.displayMetrics.heightPixels - size - dp(DISMISS_TARGET_BOTTOM_MARGIN_DP)
+        }
+        runCatching {
+            windowManager.addView(target, targetParams)
+            dismissTargetView = target
+            dismissTargetParams = targetParams
+            target.animate().alpha(0.92f).scaleX(1f).scaleY(1f).setDuration(160).start()
+        }.onFailure { Log.w(TAG, "Failed to show chat-head dismiss target", it) }
+    }
+
+    private fun isOverDismissTarget(bubbleParams: WindowManager.LayoutParams): Boolean {
+        val targetParams = dismissTargetParams ?: return false
+        val bubbleCenterX = bubbleParams.x + bubbleParams.width / 2f
+        val bubbleCenterY = bubbleParams.y + bubbleParams.height / 2f
+        val targetCenterX = targetParams.x + targetParams.width / 2f
+        val targetCenterY = targetParams.y + targetParams.height / 2f
+        return hypot(
+            (bubbleCenterX - targetCenterX).toDouble(),
+            (bubbleCenterY - targetCenterY).toDouble()
+        ) <= dp(DISMISS_TARGET_ACTIVATION_RADIUS_DP)
+    }
+
+    private fun updateDismissTargetState(isActive: Boolean) {
+        dismissTargetView?.animate()
+            ?.scaleX(if (isActive) 1.18f else 1f)
+            ?.scaleY(if (isActive) 1.18f else 1f)
+            ?.setDuration(100)
+            ?.start()
+        overlayView?.alpha = if (isActive) 0.65f else 1f
+    }
+
+    private fun hideDismissTarget() {
+        val target = dismissTargetView
+        dismissTargetView = null
+        dismissTargetParams = null
+        if (target != null) {
+            runCatching { windowManager.removeView(target) }
+                .onFailure { Log.w(TAG, "Failed to remove chat-head dismiss target", it) }
+        }
+        overlayView?.apply {
+            alpha = 1f
+            scaleX = 1f
+            scaleY = 1f
+        }
+    }
+
+    private fun snapMinimizedBubbleToEdge(layout: WindowManager.LayoutParams) {
+        if (isExpanded) return
+        val margin = dp(MINIMIZED_BUBBLE_MARGIN_DP)
+        layout.x = if (layout.x + layout.width / 2 < resources.displayMetrics.widthPixels / 2) {
+            margin
+        } else {
+            resources.displayMetrics.widthPixels - layout.width - margin
+        }
+        overlayView?.let { overlay ->
+            runCatching { windowManager.updateViewLayout(overlay, layout) }
         }
     }
 
@@ -700,9 +901,11 @@ class ChatHeadOverlayService : Service() {
     }
 
     private fun removeOverlay() {
+        hideDismissTarget()
         val view = overlayView
         overlayView = null
         params = null
+        minimizeOverlayAction = null
         currentSessionId = ""
         visibleSessionId = ""
         currentTranscriptScrollY = 0
@@ -922,6 +1125,11 @@ class ChatHeadOverlayService : Service() {
         private const val MINIMIZED_BADGE_SIZE_DP = 22
         private const val MINIMIZED_BUBBLE_SIZE_DP = 68
         private const val MINIMIZED_BUBBLE_MARGIN_DP = 4
+        private const val DISMISS_TARGET_SIZE_DP = 68
+        private const val DISMISS_TARGET_BOTTOM_MARGIN_DP = 48
+        private const val DISMISS_TARGET_ACTIVATION_RADIUS_DP = 74
+        private const val SYSTEM_DIALOG_REASON = "reason"
+        private const val SYSTEM_DIALOG_REASON_HOME_KEY = "homekey"
         private const val LOCAL_WORKING_GRACE_MS = 5_000L
         private val VIBING_MESSAGES = listOf(
             "Accomplishing", "Actioning", "Actualizing", "Baking", "Booping", "Brewing",
