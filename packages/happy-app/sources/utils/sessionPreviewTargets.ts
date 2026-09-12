@@ -1,12 +1,14 @@
 import type { Message } from '@/sync/typesMessage';
 
 export type SessionPreviewTargetKind = 'url' | 'file';
+export type SessionPreviewViewport = 'responsive' | 'mobile';
 
 export type SessionPreviewTarget = {
     id: string;
     kind: SessionPreviewTargetKind;
     uri: string;
     title: string;
+    preferredViewport?: SessionPreviewViewport;
     source: 'detected' | 'explicit';
     createdAt: number;
 };
@@ -20,6 +22,7 @@ const POSIX_PATH_RE = /(?:~?\/[^\s<>"'`|]+?\.(?:html?|png|jpe?g|gif|webp|svg|pdf
 const RELATIVE_PATH_RE = /(?:\.{1,2}[\\/])?[A-Za-z0-9_.@()[\]\-]+(?:[\\/][A-Za-z0-9_.@()[\]\-]+)*\.(?:html?|png|jpe?g|gif|webp|svg|pdf|md)\b/gi;
 const PREVIEW_WORD_RE = /\b(preview|deployed|deployment|live|website|site|app|open|hosted|published|available|served|running)\b/i;
 const ARTIFACT_WORD_RE = /\b(created|generated|wrote|saved|exported|rendered|built|made|artifact|file|pdf|image|download)\b/i;
+const MOBILE_PREVIEW_WORD_RE = /\b(expo(?:\s+(?:go|router))?|react[ -]?native|metro bundler|mobile (?:app|preview)|ios simulator|android emulator)\b/i;
 
 const PREVIEW_EXT_RE = /\.(?:html?|png|jpe?g|gif|webp|svg|pdf|md)(?:[?#].*)?$/i;
 
@@ -68,15 +71,19 @@ export function discoverPreviewTargetsInText(text: string, options?: { projectPa
 
     const urlCandidates = collectMatches(text, URL_RE)
         .concat(collectMatches(text, FILE_URL_RE))
-        .map((raw) => normalizeTrailingPunctuation(raw));
+        .map((raw) => normalizeTrailingPunctuation(raw))
+        .map((uri, index) => ({ uri, index, priority: previewUrlPriority(uri) }))
+        .sort((a, b) => b.priority - a.priority || b.index - a.index)
+        .map(({ uri }) => uri);
 
-    for (let i = urlCandidates.length - 1; i >= 0; i--) {
-        const uri = urlCandidates[i];
+    for (const uri of urlCandidates) {
         if (isLikelyPreviewUrl(uri, text)) {
+            const preferredViewport = MOBILE_PREVIEW_WORD_RE.test(text) ? 'mobile' as const : undefined;
             addTarget({
                 kind: uri.startsWith('file://') ? 'file' : 'url',
                 uri,
                 title: titleForUri(uri),
+                ...(preferredViewport ? { preferredViewport } : {}),
             });
             if (targets.length >= limit) return targets;
         }
@@ -107,6 +114,7 @@ export function createExplicitPreviewTarget(input: {
     uri: string;
     title?: string | null;
     kind?: SessionPreviewTargetKind;
+    preferredViewport?: SessionPreviewViewport;
     createdAt?: number;
 }): SessionPreviewTarget {
     const uri = normalizeTrailingPunctuation(input.uri.trim());
@@ -116,9 +124,42 @@ export function createExplicitPreviewTarget(input: {
         kind,
         uri,
         title: input.title?.trim() || titleForUri(uri),
+        ...(input.preferredViewport ? { preferredViewport: input.preferredViewport } : {}),
         source: 'explicit',
         createdAt: input.createdAt ?? Date.now(),
     };
+}
+
+function previewUrlPriority(rawUri: string): number {
+    try {
+        const host = new URL(rawUri).hostname.toLowerCase();
+        if (host === 'exp.direct' || host.endsWith('.exp.direct')) return 2;
+        return isLoopbackPreviewHost(host) ? 0 : 1;
+    } catch {
+        return 0;
+    }
+}
+
+export function canEmbedSessionPreviewUrl(uri: string, currentOrigin?: string): boolean {
+    try {
+        const url = new URL(uri);
+        const host = url.hostname.toLowerCase();
+        if (isLoopbackPreviewHost(host) || host === 'exp.direct' || host.endsWith('.exp.direct')) {
+            return true;
+        }
+
+        return !!currentOrigin && url.origin === currentOrigin;
+    } catch {
+        return false;
+    }
+}
+
+export function isLoopbackPreviewHost(host: string): boolean {
+    const normalizedHost = host.toLowerCase();
+    return normalizedHost === 'localhost'
+        || normalizedHost === '127.0.0.1'
+        || normalizedHost === '0.0.0.0'
+        || normalizedHost.endsWith('.localhost');
 }
 
 function getPreviewSearchText(message: Message): string {
@@ -181,6 +222,7 @@ function isLikelyPreviewUrl(rawUri: string, surroundingText: string): boolean {
         if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') return true;
         if (hostname.endsWith('.localhost')) return true;
         if (hostname === 'here.now' || hostname.endsWith('.here.now')) return true;
+        if (hostname === 'exp.direct' || hostname.endsWith('.exp.direct')) return true;
         if (hostname.includes('vercel.app') || hostname.includes('netlify.app') || hostname.includes('pages.dev')) return true;
         if (PREVIEW_EXT_RE.test(uri.pathname)) return true;
         return PREVIEW_WORD_RE.test(surroundingText);

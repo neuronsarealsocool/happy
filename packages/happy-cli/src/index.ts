@@ -34,6 +34,7 @@ import { extractNoSandboxFlag } from './utils/sandboxFlags'
 import { handleResumeCommand } from '@/resume/handleResumeCommand'
 import { ensureDaemonRunning } from './daemon/ensureDaemonRunning'
 import { handleCodexCommand } from './commands/codexCommand'
+import { handlePreviewCommand } from './commands/preview'
 import { sanitizeSessionEnvironment } from './daemon/sessionEnvironment'
 
 
@@ -114,6 +115,17 @@ Conversation history is preserved on the server, but in-flight tool calls are in
   } else if (subcommand === 'server') {
     try {
       await handleServerCommand(args.slice(1));
+    } catch (error) {
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
+      if (process.env.DEBUG) {
+        console.error(error)
+      }
+      process.exit(1)
+    }
+    return;
+  } else if (subcommand === 'preview') {
+    try {
+      await handlePreviewCommand(args.slice(1));
     } catch (error) {
       console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
       if (process.env.DEBUG) {
@@ -720,6 +732,7 @@ ${chalk.bold('Usage:')}
   happy agy               Start agy (Antigravity CLI) mode
   happy acp               Start a generic ACP-compatible agent
   happy connect           Connect AI vendor API keys
+  happy preview           Start an Expo Web HTTPS tunnel
   happy sandbox           Configure and manage OS-level sandboxing
   happy notify            Send push notification
   happy daemon            Manage background service that allows

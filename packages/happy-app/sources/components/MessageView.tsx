@@ -309,6 +309,7 @@ function ArtifactActionRow(props: {
             uri: target.uri,
             title: target.title,
             kind: target.kind as SessionPreviewTargetKind,
+            preferredViewport: target.preferredViewport,
           })}
           style={({ pressed }) => [
             styles.artifactButton,

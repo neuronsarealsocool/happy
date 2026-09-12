@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverPreviewTargetInText, discoverPreviewTargetsInText, discoverSessionPreviewTarget } from './sessionPreviewTargets';
+import { canEmbedSessionPreviewUrl, discoverPreviewTargetInText, discoverPreviewTargetsInText, discoverSessionPreviewTarget } from './sessionPreviewTargets';
 import type { Message } from '@/sync/typesMessage';
 
 describe('session preview targets', () => {
@@ -15,6 +15,44 @@ describe('session preview targets', () => {
             kind: 'url',
             uri: 'http://localhost:5173',
         });
+    });
+
+    it('marks Expo development URLs for a mobile viewport', () => {
+        expect(discoverPreviewTargetInText('Expo web is running at http://localhost:8081')).toMatchObject({
+            kind: 'url',
+            uri: 'http://localhost:8081',
+            preferredViewport: 'mobile',
+        });
+    });
+
+    it('detects Expo HTTPS tunnels as mobile previews', () => {
+        expect(discoverPreviewTargetInText('Expo Web is running at https://quiet-river.bacon.19000.exp.direct')).toMatchObject({
+            kind: 'url',
+            uri: 'https://quiet-river.bacon.19000.exp.direct',
+            preferredViewport: 'mobile',
+        });
+    });
+
+    it('prefers an Expo HTTPS tunnel over localhost output', () => {
+        expect(discoverPreviewTargetInText([
+            'Expo Web public mobile preview: https://quiet-river.bacon.19000.exp.direct',
+            'Waiting on http://localhost:8081',
+        ].join('\n'))).toMatchObject({
+            uri: 'https://quiet-river.bacon.19000.exp.direct',
+            preferredViewport: 'mobile',
+        });
+    });
+
+    it('embeds loopback, same-origin, and Expo tunnel previews only', () => {
+        expect(canEmbedSessionPreviewUrl('http://localhost:8081')).toBe(true);
+        expect(canEmbedSessionPreviewUrl('https://quiet-river.bacon.19000.exp.direct')).toBe(true);
+        expect(canEmbedSessionPreviewUrl('https://happy.example/preview', 'https://happy.example')).toBe(true);
+        expect(canEmbedSessionPreviewUrl('https://example.com')).toBe(false);
+        expect(canEmbedSessionPreviewUrl('not a url')).toBe(false);
+    });
+
+    it('leaves ordinary web development URLs responsive', () => {
+        expect(discoverPreviewTargetInText('Vite is running at http://localhost:5173')).not.toHaveProperty('preferredViewport');
     });
 
     it('detects previewable local artifacts', () => {

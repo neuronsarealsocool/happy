@@ -54,6 +54,7 @@ export const MarkdownView = React.memo((props: {
                 uri: target.uri,
                 title: target.title,
                 kind: target.kind,
+                preferredViewport: target.preferredViewport,
             });
             return;
         }

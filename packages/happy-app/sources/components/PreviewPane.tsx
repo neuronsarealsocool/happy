@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as React from 'react';
-import { ActivityIndicator, Image, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, LayoutChangeEvent, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { decodeBase64 } from '@/encryption/base64';
 import { sessionReadFile } from '@/sync/ops';
 import { openExternalUrl } from '@/utils/openExternalUrl';
 import { MarkdownView } from '@/components/markdown/MarkdownView';
-import type { SessionPreviewTarget } from '@/utils/sessionPreviewTargets';
+import { NativeOptionsPicker } from '@/components/NativeOptionsPicker';
+import { canEmbedSessionPreviewUrl, isLoopbackPreviewHost, type SessionPreviewTarget, type SessionPreviewViewport } from '@/utils/sessionPreviewTargets';
 import { registerSessionPreview, type RightPaneMode } from '@/-session/sessionPreviewStore';
 
 type PreviewPaneProps = {
@@ -20,6 +21,16 @@ type PreviewPaneProps = {
     onCollapse: () => void;
     children?: React.ReactNode;
 };
+
+type MobileDeviceId = 'iphone-15' | 'iphone-se' | 'pixel-8';
+type MobileOrientation = 'portrait' | 'landscape';
+type LocalPreviewPermission = 'unknown' | 'prompt' | 'granted' | 'denied' | 'unsupported';
+
+const MOBILE_DEVICES: ReadonlyArray<{ id: MobileDeviceId; name: string; width: number; height: number }> = [
+    { id: 'iphone-15', name: 'iPhone 15', width: 393, height: 852 },
+    { id: 'iphone-se', name: 'iPhone SE', width: 375, height: 667 },
+    { id: 'pixel-8', name: 'Pixel 8', width: 412, height: 915 },
+];
 
 export const PreviewPane = React.memo(function PreviewPane({
     sessionId,
@@ -35,8 +46,13 @@ export const PreviewPane = React.memo(function PreviewPane({
     const { theme } = useUnistyles();
     const [reloadKey, setReloadKey] = React.useState(0);
     const [addressText, setAddressText] = React.useState('');
+    const [viewport, setViewport] = React.useState<SessionPreviewViewport>(target?.preferredViewport ?? 'responsive');
+    const [mobileDeviceId, setMobileDeviceId] = React.useState<MobileDeviceId>('iphone-15');
+    const [mobileOrientation, setMobileOrientation] = React.useState<MobileOrientation>('portrait');
+    const localPreviewPermission = useLocalPreviewPermission(target?.kind === 'url' ? target.uri : null);
     const canPreview = !!target && mode === 'preview';
     const canEmbedUrl = canPreview && target.kind === 'url' && canEmbedPreviewUrl(target.uri);
+    const localPreviewDenied = canEmbedUrl && localPreviewPermission === 'denied';
 
     React.useEffect(() => {
         setReloadKey((current) => current + 1);
@@ -45,6 +61,10 @@ export const PreviewPane = React.memo(function PreviewPane({
     React.useEffect(() => {
         setAddressText(target?.kind === 'url' ? target.uri : '');
     }, [target?.kind, target?.uri]);
+
+    React.useEffect(() => {
+        setViewport(target?.preferredViewport ?? 'responsive');
+    }, [target?.id, target?.preferredViewport]);
 
     const handleOpenExternal = React.useCallback(() => {
         if (target) openExternalUrl(externalUriForTarget(target));
@@ -57,8 +77,11 @@ export const PreviewPane = React.memo(function PreviewPane({
             uri,
             title: titleForAddress(uri),
             kind: 'url',
+            preferredViewport: viewport,
         });
-    }, [addressText, sessionId]);
+    }, [addressText, sessionId, viewport]);
+
+    const mobileDevice = MOBILE_DEVICES.find((device) => device.id === mobileDeviceId) ?? MOBILE_DEVICES[0];
 
     return (
         <View style={styles.container}>
@@ -126,25 +149,78 @@ export const PreviewPane = React.memo(function PreviewPane({
                 </View>
             ) : null}
 
+            {canEmbedUrl && !localPreviewDenied ? (
+                <View style={styles.viewportBar}>
+                    <View style={styles.viewportToggle}>
+                        <ViewportButton
+                            icon="desktop-outline"
+                            label="Responsive preview"
+                            active={viewport === 'responsive'}
+                            onPress={() => setViewport('responsive')}
+                        />
+                        <ViewportButton
+                            icon="phone-portrait-outline"
+                            label="Mobile preview"
+                            active={viewport === 'mobile'}
+                            onPress={() => setViewport('mobile')}
+                        />
+                    </View>
+                    {viewport === 'mobile' ? (
+                        <View style={styles.mobileControls}>
+                            <View style={styles.devicePickerWrap}>
+                                <NativeOptionsPicker
+                                    title="Preview device"
+                                    triggerLabel={mobileDevice.name}
+                                    options={MOBILE_DEVICES.map((device) => ({ key: device.id, label: `${device.name} (${device.width} x ${device.height})` }))}
+                                    selectedKey={mobileDevice.id}
+                                    onSelect={(key) => setMobileDeviceId(key as MobileDeviceId)}
+                                >
+                                    <View style={styles.devicePickerTrigger}>
+                                        <Text style={styles.devicePickerText} numberOfLines={1}>{mobileDevice.name}</Text>
+                                        <Ionicons name="chevron-down" size={13} color={theme.colors.textSecondary} />
+                                    </View>
+                                </NativeOptionsPicker>
+                            </View>
+                            <IconButton
+                                icon="phone-landscape-outline"
+                                label="Rotate device"
+                                onPress={() => setMobileOrientation((current) => current === 'portrait' ? 'landscape' : 'portrait')}
+                            />
+                        </View>
+                    ) : null}
+                </View>
+            ) : null}
+
             {mode === 'files' ? (
                 <View style={styles.content}>{children}</View>
             ) : !target ? (
                 <EmptyPreview title="No preview yet" subtitle="Live websites and previewable artifacts will appear here." />
+            ) : localPreviewDenied ? (
+                <EmptyPreview
+                    title="Local preview access is blocked"
+                    subtitle="Allow Local Network Access for this site in your browser settings, then reload the preview."
+                    actionLabel="Reload"
+                    onAction={() => setReloadKey((current) => current + 1)}
+                />
             ) : canEmbedUrl ? (
-                <View style={styles.webFrameWrap}>
-                    {React.createElement('iframe', {
-                        key: `${target.id}:${reloadKey}`,
-                        src: target.uri,
-                        title: target.title,
-                        style: {
-                            border: '0',
-                            width: '100%',
-                            height: '100%',
-                            backgroundColor: theme.colors.surface,
-                        },
-                        sandbox: 'allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts',
-                    })}
-                </View>
+                viewport === 'mobile' ? (
+                    <MobilePreviewFrame
+                        device={mobileDevice}
+                        orientation={mobileOrientation}
+                        reloadKey={`${target.id}:${reloadKey}`}
+                        uri={target.uri}
+                        title={target.title}
+                        onHome={() => setReloadKey((current) => current + 1)}
+                    />
+                ) : (
+                    <View style={styles.webFrameWrap}>
+                        <PreviewIframe
+                            reloadKey={`${target.id}:${reloadKey}`}
+                            uri={target.uri}
+                            title={target.title}
+                        />
+                    </View>
+                )
             ) : target.kind === 'url' ? (
                 <EmptyPreview
                     title={target.title}
@@ -166,6 +242,200 @@ export const PreviewPane = React.memo(function PreviewPane({
     );
 });
 
+function PreviewIframe({
+    reloadKey,
+    uri,
+    title,
+    width = '100%',
+    height = '100%',
+    borderRadius = 0,
+    onLoad,
+}: {
+    reloadKey: string;
+    uri: string;
+    title: string;
+    width?: number | string;
+    height?: number | string;
+    borderRadius?: number;
+    onLoad?: () => void;
+}) {
+    const { theme } = useUnistyles();
+    return React.createElement('iframe', {
+        key: reloadKey,
+        src: uri,
+        title,
+        allow: 'accelerometer; camera; clipboard-read; clipboard-write; geolocation; gyroscope; microphone',
+        allowFullScreen: true,
+        onLoad,
+        sandbox: 'allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts',
+        style: {
+            display: 'block',
+            border: '0',
+            width,
+            height,
+            borderRadius,
+            backgroundColor: theme.colors.surface,
+        },
+    });
+}
+
+function MobilePreviewFrame({
+    device,
+    orientation,
+    reloadKey,
+    uri,
+    title,
+    onHome,
+}: {
+    device: (typeof MOBILE_DEVICES)[number];
+    orientation: MobileOrientation;
+    reloadKey: string;
+    uri: string;
+    title: string;
+    onHome: () => void;
+}) {
+    const [availableSize, setAvailableSize] = React.useState({ width: 0, height: 0 });
+    const [navigationDepth, setNavigationDepth] = React.useState(0);
+    const navigationDepthRef = React.useRef(0);
+    const observedHistoryLengthRef = React.useRef<number | null>(null);
+    const pendingBackRef = React.useRef(false);
+    const screenWidth = orientation === 'portrait' ? device.width : device.height;
+    const screenHeight = orientation === 'portrait' ? device.height : device.width;
+    const shellWidth = screenWidth + 12;
+    const shellHeight = screenHeight + 12;
+    const controlsHeight = 42;
+    const simulatorHeight = shellHeight + controlsHeight;
+    const scale = availableSize.width > 0 && availableSize.height > 0
+        ? Math.min(1, Math.max(0.1, Math.min((availableSize.width - 24) / shellWidth, (availableSize.height - 24) / simulatorHeight)))
+        : 0;
+
+    const handleLayout = React.useCallback((event: LayoutChangeEvent) => {
+        const { width, height } = event.nativeEvent.layout;
+        setAvailableSize((current) => current.width === width && current.height === height ? current : { width, height });
+    }, []);
+
+    React.useEffect(() => {
+        navigationDepthRef.current = 0;
+        observedHistoryLengthRef.current = null;
+        pendingBackRef.current = false;
+        setNavigationDepth(0);
+    }, [reloadKey]);
+
+    React.useEffect(() => {
+        if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+
+        const syncHistoryState = () => {
+            const observedLength = observedHistoryLengthRef.current;
+            if (observedLength !== null && window.history.length > observedLength) {
+                const nextDepth = navigationDepthRef.current + window.history.length - observedLength;
+                navigationDepthRef.current = nextDepth;
+                observedHistoryLengthRef.current = window.history.length;
+                setNavigationDepth(nextDepth);
+            }
+        };
+        const interval = window.setInterval(syncHistoryState, 300);
+        return () => window.clearInterval(interval);
+    }, []);
+
+    const handleFrameLoad = React.useCallback(() => {
+        if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+        const observedLength = observedHistoryLengthRef.current;
+        if (observedLength === null) {
+            observedHistoryLengthRef.current = window.history.length;
+            return;
+        }
+        if (pendingBackRef.current) {
+            pendingBackRef.current = false;
+            return;
+        }
+
+        const addedEntries = Math.max(1, window.history.length - observedLength);
+        const nextDepth = navigationDepthRef.current + addedEntries;
+        navigationDepthRef.current = nextDepth;
+        observedHistoryLengthRef.current = Math.max(observedLength, window.history.length);
+        setNavigationDepth(nextDepth);
+    }, []);
+
+    const handleBack = React.useCallback(() => {
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && navigationDepthRef.current > 0) {
+            const nextDepth = navigationDepthRef.current - 1;
+            navigationDepthRef.current = nextDepth;
+            pendingBackRef.current = true;
+            setNavigationDepth(nextDepth);
+            window.history.back();
+        }
+    }, []);
+
+    return (
+        <View style={styles.mobileStage} onLayout={handleLayout}>
+            {scale > 0 ? (
+                <View style={{ width: shellWidth * scale, height: simulatorHeight * scale }}>
+                    <View style={[
+                        styles.simulator,
+                        {
+                            width: shellWidth,
+                            height: simulatorHeight,
+                            transform: [{ scale }],
+                            ...(Platform.OS === 'web' ? { transformOrigin: 'top left' as any } : {}),
+                        },
+                    ]}>
+                        <View style={[styles.deviceShell, { width: shellWidth, height: shellHeight }]}>
+                            <PreviewIframe
+                                reloadKey={reloadKey}
+                                uri={uri}
+                                title={`${title} on ${device.name}`}
+                                width={screenWidth}
+                                height={screenHeight}
+                                borderRadius={24}
+                                onLoad={handleFrameLoad}
+                            />
+                        </View>
+                        <View style={styles.simulatorControls}>
+                            <SimulatorButton
+                                icon="chevron-back"
+                                label="Go back"
+                                disabled={navigationDepth === 0}
+                                onPress={handleBack}
+                            />
+                            <SimulatorButton
+                                icon="ellipse-outline"
+                                label="Go home"
+                                onPress={onHome}
+                            />
+                        </View>
+                    </View>
+                </View>
+            ) : null}
+        </View>
+    );
+}
+
+function SimulatorButton({
+    icon,
+    label,
+    disabled = false,
+    onPress,
+}: {
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    label: string;
+    disabled?: boolean;
+    onPress: () => void;
+}) {
+    const { theme } = useUnistyles();
+    return (
+        <Pressable
+            accessibilityLabel={label}
+            accessibilityRole="button"
+            accessibilityState={{ disabled }}
+            disabled={disabled}
+            onPress={onPress}
+            style={({ pressed }) => [styles.simulatorButton, disabled && styles.disabled, pressed && styles.pressed]}
+        >
+            <Ionicons name={icon} size={18} color={theme.colors.textSecondary} />
+        </Pressable>
+    );
+}
+
 function normalizeAddressInput(input: string): string | null {
     const trimmed = input.trim();
     if (!trimmed) return null;
@@ -186,22 +456,7 @@ function titleForAddress(uri: string): string {
 
 function canEmbedPreviewUrl(uri: string): boolean {
     if (Platform.OS !== 'web') return false;
-
-    try {
-        const url = new URL(uri);
-        const host = url.hostname.toLowerCase();
-        if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host.endsWith('.localhost')) {
-            return true;
-        }
-
-        if (typeof window !== 'undefined' && url.origin === window.location.origin) {
-            return true;
-        }
-    } catch {
-        return false;
-    }
-
-    return false;
+    return canEmbedSessionPreviewUrl(uri, typeof window !== 'undefined' ? window.location.origin : undefined);
 }
 
 function blockedPreviewMessage(uri: string): string {
@@ -439,6 +694,88 @@ function ModeButton({
     );
 }
 
+function useLocalPreviewPermission(uri: string | null): LocalPreviewPermission {
+    const [permission, setPermission] = React.useState<LocalPreviewPermission>('unknown');
+
+    React.useEffect(() => {
+        if (!uri || !isHostedPageAccessingLoopback(uri)) {
+            setPermission('unsupported');
+            return;
+        }
+
+        const permissions = typeof navigator !== 'undefined' ? navigator.permissions : undefined;
+        if (!permissions?.query) {
+            setPermission('unsupported');
+            return;
+        }
+
+        let active = true;
+        let status: PermissionStatus | null = null;
+        const updatePermission = () => {
+            if (active && status) setPermission(status.state);
+        };
+
+        permissions.query({ name: 'local-network-access' as PermissionName })
+            .then((result) => {
+                if (!active) return;
+                status = result;
+                updatePermission();
+                status.addEventListener?.('change', updatePermission);
+            })
+            .catch(() => {
+                if (active) setPermission('unsupported');
+            });
+
+        return () => {
+            active = false;
+            status?.removeEventListener?.('change', updatePermission);
+        };
+    }, [uri]);
+
+    return permission;
+}
+
+function isHostedPageAccessingLoopback(uri: string): boolean {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || window.location.protocol !== 'https:') {
+        return false;
+    }
+
+    try {
+        const host = new URL(uri).hostname.toLowerCase();
+        return isLoopbackPreviewHost(host) && host !== '0.0.0.0';
+    } catch {
+        return false;
+    }
+}
+
+function ViewportButton({
+    icon,
+    label,
+    active,
+    onPress,
+}: {
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    label: string;
+    active: boolean;
+    onPress: () => void;
+}) {
+    const { theme } = useUnistyles();
+    return (
+        <Pressable
+            accessibilityLabel={label}
+            accessibilityState={{ selected: active }}
+            onPress={onPress}
+            style={({ pressed }) => [
+                styles.viewportButton,
+                active && { backgroundColor: theme.colors.surface },
+                pressed && styles.pressed,
+            ]}
+        >
+            <Ionicons name={icon} size={16} color={active ? theme.colors.text : theme.colors.textSecondary} />
+        </Pressable>
+    );
+}
+
 function IconButton({
     icon,
     label,
@@ -571,6 +908,64 @@ const styles = StyleSheet.create((theme) => ({
         color: theme.colors.text,
         fontSize: 13,
     },
+    viewportBar: {
+        minHeight: 42,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.colors.divider,
+        backgroundColor: theme.colors.groupped.background,
+    },
+    viewportToggle: {
+        height: 30,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+        padding: 2,
+        borderRadius: 7,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.divider,
+    },
+    viewportButton: {
+        width: 32,
+        height: 24,
+        borderRadius: 5,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    mobileControls: {
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 4,
+    },
+    devicePickerWrap: {
+        width: 132,
+    },
+    devicePickerTrigger: {
+        minWidth: 0,
+        height: 30,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 6,
+        paddingHorizontal: 9,
+        borderRadius: 7,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.divider,
+        backgroundColor: theme.colors.surface,
+    },
+    devicePickerText: {
+        minWidth: 0,
+        flex: 1,
+        fontSize: 12,
+        color: theme.colors.text,
+    },
     iconButton: {
         width: 30,
         height: 30,
@@ -587,6 +982,45 @@ const styles = StyleSheet.create((theme) => ({
     webFrameWrap: {
         flex: 1,
         backgroundColor: theme.colors.surface,
+    },
+    mobileStage: {
+        flex: 1,
+        minWidth: 0,
+        minHeight: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+        backgroundColor: theme.colors.groupped.background,
+    },
+    deviceShell: {
+        padding: 6,
+        borderRadius: 30,
+        overflow: 'hidden',
+        backgroundColor: '#171719',
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.24,
+        shadowRadius: 18,
+    },
+    simulator: {
+        alignItems: 'center',
+    },
+    simulatorControls: {
+        height: 42,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 22,
+    },
+    simulatorButton: {
+        width: 34,
+        height: 34,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 17,
+    },
+    disabled: {
+        opacity: 0.3,
     },
     previewImage: {
         width: '100%',

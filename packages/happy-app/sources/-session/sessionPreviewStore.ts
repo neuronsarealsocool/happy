@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { create } from 'zustand';
-import { createExplicitPreviewTarget, type SessionPreviewTarget, type SessionPreviewTargetKind } from '@/utils/sessionPreviewTargets';
+import { createExplicitPreviewTarget, type SessionPreviewTarget, type SessionPreviewTargetKind, type SessionPreviewViewport } from '@/utils/sessionPreviewTargets';
 
 export type RightPaneMode = 'preview' | 'files';
 
@@ -20,6 +20,7 @@ type SessionPreviewStore = {
         uri: string;
         title?: string | null;
         kind?: SessionPreviewTargetKind;
+        preferredViewport?: SessionPreviewViewport;
         createdAt?: number;
     }) => void;
     setMode: (sessionId: string, mode: RightPaneMode) => void;
@@ -217,6 +218,7 @@ export function registerSessionPreview(sessionId: string, input: {
     uri: string;
     title?: string | null;
     kind?: SessionPreviewTargetKind;
+    preferredViewport?: SessionPreviewViewport;
     createdAt?: number;
 }) {
     useSessionPreviewStore.getState().registerExplicitPreview(sessionId, input);

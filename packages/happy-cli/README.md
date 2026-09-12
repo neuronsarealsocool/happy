@@ -35,6 +35,7 @@ happy codex
 happy agy        # Antigravity CLI (Gemini's successor)
 happy gemini     # deprecated — use `happy agy`
 happy openclaw
+happy preview      # Expo Web through a temporary HTTPS tunnel
 
 # or any ACP-compatible CLI
 happy acp opencode
@@ -115,6 +116,7 @@ happy connect status
 | `happy acp` | Start any ACP-compatible agent |
 | `happy resume <id>` | Resume a previous session |
 | `happy notify` | Send push notification to your devices |
+| `happy preview` | Start Expo Web through a temporary HTTPS tunnel for remote previews |
 | `happy doctor` | Diagnostics & troubleshooting |
 
 ---
