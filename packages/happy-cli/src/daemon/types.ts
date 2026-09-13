@@ -29,3 +29,18 @@ export interface TrackedSession {
   /** tmux session identifier (format: session:window) */
   tmuxSessionId?: string;
 }
+
+export interface ResumeSessionReconnectData {
+  encryptionKey: string;
+  encryptionVariant: 'legacy' | 'dataKey';
+  seq: number;
+  metadataVersion: number;
+  agentStateVersion: number;
+  metadata: Metadata;
+}
+
+export interface ResumeSessionOptions {
+  model?: string;
+  permissionMode?: string;
+  reconnect?: ResumeSessionReconnectData;
+}

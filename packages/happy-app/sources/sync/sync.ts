@@ -58,6 +58,15 @@ import { getFriendsList, getUserProfile } from './apiFriends';
 import { fetchFeed } from './apiFeed';
 import { FeedItem } from './feedTypes';
 import { UserProfile } from './friendTypes';
+
+export type SessionReconnectData = {
+    encryptionKey: string;
+    encryptionVariant: 'legacy' | 'dataKey';
+    seq: number;
+    metadataVersion: number;
+    agentStateVersion: number;
+    metadata: NonNullable<Session['metadata']>;
+};
 import { resolveControlHandoffDirection } from './controlHandoff';
 import { resolveMessageModeMeta } from './messageMeta';
 import type { AttachmentPreview, UploadedAttachment } from './attachmentTypes';
@@ -785,6 +794,22 @@ class Sync {
         await this.getMessagesSync(sessionId).invalidateAndAwait();
     }
 
+    getSessionReconnectData(sessionId: string): SessionReconnectData | undefined {
+        const session = storage.getState().sessions[sessionId];
+        const encryption = this.encryption.getSessionReconnectEncryption(sessionId);
+        if (!session?.metadata || !encryption) {
+            return undefined;
+        }
+        return {
+            encryptionKey: encodeBase64(encryption.key, 'base64'),
+            encryptionVariant: encryption.variant,
+            seq: session.seq,
+            metadataVersion: session.metadataVersion,
+            agentStateVersion: session.agentStateVersion,
+            metadata: session.metadata,
+        };
+    }
+
     private async resumeChatHeadSessionIfNeeded(sessionId: string) {
         const session = storage.getState().sessions[sessionId];
         if (!session || session.metadata?.capabilities?.resume === false) {
@@ -801,11 +826,12 @@ class Sync {
         const modeMeta = resolveMessageModeMeta(session, storage.getState().settings);
         const result = await apiSocket.machineRPC<
             { type: string; errorMessage?: string },
-            { sessionId: string; model?: string; permissionMode?: string }
+            { sessionId: string; model?: string; permissionMode?: string; reconnect?: SessionReconnectData }
         >(machineId, 'resume-happy-session', {
             sessionId,
             model: modeMeta.model ?? undefined,
             permissionMode: modeMeta.permissionMode,
+            reconnect: this.getSessionReconnectData(sessionId),
         });
         if (result.type !== 'success') {
             throw new Error(result.errorMessage || `Failed to resume chat-head session ${sessionId}`);

@@ -4,7 +4,7 @@
  */
 
 import { apiSocket } from './apiSocket';
-import { sync } from './sync';
+import { sync, type SessionReconnectData } from './sync';
 import { storage } from './storage';
 import type { AgentQuestionAnswer, MachineMetadata, SessionAgentModesPatch } from './storageTypes';
 import { markAgentModePushPending, clearAgentModePushPending, type AgentModeField } from './agentModesPending';
@@ -465,10 +465,15 @@ export async function machineResumeSession(options: ResumeSessionOptions & { mod
     const { machineId, sessionId, model, permissionMode } = options;
 
     try {
-        const result = await apiSocket.machineRPC<SpawnSessionResult, { sessionId: string; model?: string; permissionMode?: string }>(
+        const result = await apiSocket.machineRPC<SpawnSessionResult, {
+            sessionId: string;
+            model?: string;
+            permissionMode?: string;
+            reconnect?: SessionReconnectData;
+        }>(
             machineId,
             'resume-happy-session',
-            { sessionId, model, permissionMode },
+            { sessionId, model, permissionMode, reconnect: sync.getSessionReconnectData(sessionId) },
         );
         return result;
     } catch (error) {

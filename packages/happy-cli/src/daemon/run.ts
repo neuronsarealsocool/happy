@@ -4,7 +4,7 @@ import * as tmp from 'tmp';
 import axios from 'axios';
 
 import { ApiClient } from '@/api/api';
-import { TrackedSession, SessionEncryptionData } from './types';
+import { TrackedSession, SessionEncryptionData, type ResumeSessionOptions } from './types';
 import { MachineMetadata, DaemonState, Metadata } from '@/api/types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/registerCommonHandlers';
 import { logger } from '@/ui/logger';
@@ -717,7 +717,7 @@ export async function startDaemon(): Promise<void> {
       }
     };
 
-    const resumeSession = async (happySessionId: string, options?: { model?: string; permissionMode?: string }): Promise<SpawnSessionResult> => {
+    const resumeSession = async (happySessionId: string, options?: ResumeSessionOptions): Promise<SpawnSessionResult> => {
       const pendingResume = pendingResumeBySessionId.get(happySessionId);
       if (pendingResume) {
         logger.debug(`[DAEMON RUN] Session ${happySessionId} resume already in progress; joining existing resume`);
@@ -726,7 +726,52 @@ export async function startDaemon(): Promise<void> {
 
       const resumePromise = (async (): Promise<SpawnSessionResult> => {
       try {
-        const tracked = findTrackedSessionById(happySessionId);
+        let tracked = findTrackedSessionById(happySessionId);
+        if (!tracked && options?.reconnect) {
+          const reconnect = options.reconnect;
+          const encryptionKey = decodeBase64(reconnect.encryptionKey);
+          if (encryptionKey.length !== 32) {
+            return { type: 'error', errorMessage: `Session ${happySessionId} supplied an invalid reconnect key.` };
+          }
+          if (reconnect.encryptionVariant !== 'legacy' && reconnect.encryptionVariant !== 'dataKey') {
+            return { type: 'error', errorMessage: `Session ${happySessionId} supplied an invalid encryption variant.` };
+          }
+          if (!reconnect.metadata?.path || typeof reconnect.metadata.path !== 'string') {
+            return { type: 'error', errorMessage: `Session ${happySessionId} supplied invalid reconnect metadata.` };
+          }
+          if (reconnect.metadata.machineId && reconnect.metadata.machineId !== machineId) {
+            return { type: 'error', errorMessage: `Session ${happySessionId} belongs to another machine.` };
+          }
+          const versions = [reconnect.seq, reconnect.metadataVersion, reconnect.agentStateVersion];
+          if (versions.some(value => !Number.isSafeInteger(value) || value < 0)) {
+            return { type: 'error', errorMessage: `Session ${happySessionId} supplied invalid reconnect versions.` };
+          }
+
+          tracked = {
+            startedBy: 'mobile-reconnect',
+            happySessionId,
+            happySessionMetadataFromLocalWebhook: reconnect.metadata,
+            encryption: {
+              encryptionKey,
+              encryptionVariant: reconnect.encryptionVariant,
+              seq: reconnect.seq,
+              metadataVersion: reconnect.metadataVersion,
+              agentStateVersion: reconnect.agentStateVersion,
+            },
+            pid: 0,
+          };
+          sessionIdToFinishedSession.set(happySessionId, tracked);
+          persistSession(happySessionId, {
+            encryptionKey: reconnect.encryptionKey,
+            encryptionVariant: reconnect.encryptionVariant,
+            seq: reconnect.seq,
+            metadataVersion: reconnect.metadataVersion,
+            agentStateVersion: reconnect.agentStateVersion,
+            metadata: reconnect.metadata,
+            savedAt: Date.now(),
+          });
+          logger.debug(`[DAEMON RUN] Restored historical session ${happySessionId} from encrypted mobile reconnect data`);
+        }
         if (!tracked) {
           return { type: 'error', errorMessage: `Session ${happySessionId} is not tracked by this daemon. It may have been started before the daemon or on another machine.` };
         }
