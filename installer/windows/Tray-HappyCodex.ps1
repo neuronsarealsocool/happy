@@ -1,5 +1,7 @@
 param(
-    [switch]$StartDaemon
+    [switch]$StartDaemon,
+    [ValidateSet("StartDaemon", "StopDaemon", "RestartDaemon", "OpenHappyCodex", "OpenHappyWeb", "LoginHappy", "LoginCodex", "UpdateEverything", "Doctor", "OpenLogs", "SelfTest")]
+    [string]$Action
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,9 +50,52 @@ function Start-ConsoleCommand {
 }
 
 function Start-HiddenCommand {
-    param([string]$Command)
+    param(
+        [string]$Command,
+        [switch]$Wait
+    )
 
-    Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $Command) -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE | Out-Null
+    $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/d /s /c `"$Command`"" -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE -PassThru
+    if ($Wait) {
+        $process.WaitForExit()
+        return $process.ExitCode
+    }
+
+    return 0
+}
+
+function Test-HappyDaemonRunning {
+    $happy = Find-CommandPath @("happy.cmd", "happy")
+    if (-not $happy) {
+        return $false
+    }
+
+    $output = & $happy doctor 2>$null
+    return (($output -join "`n") -match "Daemon is running")
+}
+
+function Wait-HappyDaemonRunning {
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-HappyDaemonRunning) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    return $false
+}
+
+function Wait-HappyDaemonStopped {
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-HappyDaemonRunning)) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    return $false
 }
 
 function Show-Balloon {
@@ -72,8 +117,8 @@ function Start-HappyDaemon {
     }
 
     $log = Join-Path $LogDir "daemon-startup.log"
-    Start-HiddenCommand "`"$happy`" daemon start > `"$log`" 2>&1"
-    return $true
+    Start-HiddenCommand "`"$happy`" daemon start > `"$log`" 2>&1" | Out-Null
+    return (Wait-HappyDaemonRunning)
 }
 
 function Stop-HappyDaemon {
@@ -83,8 +128,8 @@ function Stop-HappyDaemon {
     }
 
     $log = Join-Path $LogDir "daemon-stop.log"
-    Start-HiddenCommand "`"$happy`" daemon stop > `"$log`" 2>&1"
-    return $true
+    $exitCode = Start-HiddenCommand "`"$happy`" daemon stop > `"$log`" 2>&1" -Wait
+    return ($exitCode -eq 0 -and (Wait-HappyDaemonStopped))
 }
 
 function Open-HappyCodex {
@@ -139,7 +184,74 @@ function Open-Logs {
     Invoke-Item $LogDir
 }
 
+function Test-HappyCodexTray {
+    Set-HappyEnvironment
+
+    $happy = Find-CommandPath @("happy.cmd", "happy")
+    $codex = Find-CommandPath @("codex.cmd", "codex")
+    $updater = Join-Path $InstallDir "Update-HappyCodex.cmd"
+    $trayVbs = Join-Path $InstallDir "Start-HappyCodexTray.vbs"
+    $startupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Tray.lnk"
+    $startupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Daemon.lnk"
+
+    $checks = @(
+        [pscustomobject]@{ Name = "Happy CLI"; Ok = [bool]$happy; Detail = $happy },
+        [pscustomobject]@{ Name = "Codex CLI"; Ok = [bool]$codex; Detail = $codex },
+        [pscustomobject]@{ Name = "Happy Codex launcher"; Ok = (Test-Path $Launcher); Detail = $Launcher },
+        [pscustomobject]@{ Name = "Daemon launcher"; Ok = (Test-Path $DaemonLauncher); Detail = $DaemonLauncher },
+        [pscustomobject]@{ Name = "Updater launcher"; Ok = (Test-Path $updater); Detail = $updater },
+        [pscustomobject]@{ Name = "Hidden tray startup launcher"; Ok = (Test-Path $trayVbs); Detail = $trayVbs },
+        [pscustomobject]@{ Name = "Tray startup shortcut"; Ok = (Test-Path $startupTray); Detail = $startupTray },
+        [pscustomobject]@{ Name = "Legacy daemon startup shortcut removed"; Ok = (-not (Test-Path $startupDaemon)); Detail = $startupDaemon },
+        [pscustomobject]@{ Name = "Happy web URL"; Ok = ($HappyWebUrl -eq "https://queued-tablet-2f9v.here.now/"); Detail = $HappyWebUrl }
+    )
+
+    foreach ($check in $checks) {
+        if ($check.Ok) {
+            Write-Host "PASS $($check.Name): $($check.Detail)"
+        }
+        else {
+            Write-Host "FAIL $($check.Name): $($check.Detail)"
+        }
+    }
+
+    if ($checks | Where-Object { -not $_.Ok }) {
+        exit 1
+    }
+}
+
+function Invoke-TrayAction {
+    param([string]$Name)
+
+    switch ($Name) {
+        "StartDaemon" {
+            if (-not (Start-HappyDaemon)) { exit 1 }
+        }
+        "StopDaemon" {
+            if (-not (Stop-HappyDaemon)) { exit 1 }
+        }
+        "RestartDaemon" {
+            Stop-HappyDaemon | Out-Null
+            Start-Sleep -Seconds 2
+            if (-not (Start-HappyDaemon)) { exit 1 }
+        }
+        "OpenHappyCodex" { Open-HappyCodex }
+        "OpenHappyWeb" { Open-HappyWeb }
+        "LoginHappy" { Open-HappyLogin }
+        "LoginCodex" { Open-CodexLogin }
+        "UpdateEverything" { Update-Everything }
+        "Doctor" { Open-Doctor }
+        "OpenLogs" { Open-Logs }
+        "SelfTest" { Test-HappyCodexTray }
+    }
+}
+
 Set-HappyEnvironment
+
+if ($Action) {
+    Invoke-TrayAction $Action
+    exit 0
+}
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing

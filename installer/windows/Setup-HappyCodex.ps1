@@ -91,6 +91,34 @@ function Invoke-Logged {
     return $process.ExitCode
 }
 
+function Start-HiddenCommand {
+    param([string]$Command)
+
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/d /s /c `"$Command`"" -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE | Out-Null
+}
+
+function Test-HappyDaemonRunning {
+    $happy = Find-CommandPath @("happy.cmd", "happy")
+    if (-not $happy) {
+        return $false
+    }
+
+    $output = & $happy doctor 2>$null
+    return (($output -join "`n") -match "Daemon is running")
+}
+
+function Wait-HappyDaemonRunning {
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-HappyDaemonRunning) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    return $false
+}
+
 function Get-NpmGlobalRoot {
     $npm = Find-CommandPath @("npm.cmd", "npm")
     if (-not $npm) {
@@ -276,6 +304,13 @@ call happy.cmd daemon start > "%LOCALAPPDATA%\HappyCodex\logs\daemon-startup.log
 exit /b 0
 '@
 
+    $trayLauncherScript = @'
+Set shell = CreateObject("WScript.Shell")
+installDir = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\HappyCodex"
+command = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & installDir & "\Tray-HappyCodex.ps1"" -StartDaemon"
+shell.Run command, 0, False
+'@
+
     $trayTarget = Join-Path $InstallDir "Tray-HappyCodex.ps1"
     if ($BundledTrayScript) {
         Set-Content -Path $trayTarget -Value $BundledTrayScript -Encoding UTF8
@@ -330,6 +365,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%installer%"
 
     Set-Content -Path (Join-Path $InstallDir "Start-HappyCodex.cmd") -Value $startScript -Encoding ASCII
     Set-Content -Path (Join-Path $InstallDir "Start-HappyDaemon.cmd") -Value $daemonScript -Encoding ASCII
+    Set-Content -Path (Join-Path $InstallDir "Start-HappyCodexTray.vbs") -Value $trayLauncherScript -Encoding ASCII
     Set-Content -Path (Join-Path $InstallDir "Update-HappyCodex.cmd") -Value $updateScript -Encoding ASCII
 }
 
@@ -364,14 +400,14 @@ URL=$HappyWebUrl
 function Install-Shortcuts {
     Write-Step "Creating shortcuts"
 
-    $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
     $cmd = Join-Path $env:WINDIR "System32\cmd.exe"
+    $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
     $startArgs = "/k `"$InstallDir\Start-HappyCodex.cmd`""
     $updateArgs = "/k `"$InstallDir\Update-HappyCodex.cmd`""
-    $trayArgs = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstallDir\Tray-HappyCodex.ps1`" -StartDaemon"
+    $trayVbsArgs = "`"$InstallDir\Start-HappyCodexTray.vbs`""
 
     New-Shortcut -Path (Join-Path $StartMenuDir "Happy Codex.lnk") -TargetPath $cmd -Arguments $startArgs
-    New-Shortcut -Path (Join-Path $StartMenuDir "Happy Codex Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
+    New-Shortcut -Path (Join-Path $StartMenuDir "Happy Codex Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
     New-Shortcut -Path (Join-Path $StartMenuDir "Update and Login Happy Codex.lnk") -TargetPath $cmd -Arguments $updateArgs
     New-WebShortcut -Path (Join-Path $StartMenuDir "Happy Web.url")
 
@@ -380,7 +416,7 @@ function Install-Shortcuts {
 
     if (-not $NoStartup) {
         Remove-Item -LiteralPath (Join-Path $StartupDir "Happy Codex Daemon.lnk") -ErrorAction SilentlyContinue
-        New-Shortcut -Path (Join-Path $StartupDir "Happy Codex Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
+        New-Shortcut -Path (Join-Path $StartupDir "Happy Codex Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
     }
 }
 
@@ -397,7 +433,13 @@ function Start-HappyDaemon {
         throw "happy was not found after installation."
     }
 
-    Invoke-Logged $happy @("daemon", "start") -AllowFailure
+    $log = Join-Path $LogDir "daemon-startup.log"
+    Write-Host "> $happy daemon start"
+    Start-HiddenCommand "`"$happy`" daemon start > `"$log`" 2>&1"
+    if (-not (Wait-HappyDaemonRunning)) {
+        throw "Happy daemon did not report as running. Log file: $log"
+    }
+    Write-Host "Happy daemon is running."
 }
 
 function Start-LoginFlow {

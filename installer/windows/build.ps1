@@ -17,7 +17,8 @@ catch {
 
 $setupSource = Get-Content -Raw (Join-Path $ScriptDir "Setup-HappyCodex.ps1")
 $traySource = Get-Content -Raw (Join-Path $ScriptDir "Tray-HappyCodex.ps1")
-$bundledTrayAssignment = "`$BundledTrayScript = @'`r`n$traySource`r`n'@"
+$trayBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($traySource))
+$bundledTrayAssignment = "`$BundledTrayScript = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(`"$trayBase64`"))"
 $compiledInput = $setupSource -replace '\$BundledTrayScript = \$null', $bundledTrayAssignment
 Set-Content -Path $CompiledInputPath -Value $compiledInput -Encoding UTF8
 
