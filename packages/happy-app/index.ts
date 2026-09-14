@@ -11,10 +11,12 @@ import {
   runAndroidChatHeadReplyTask,
 } from './sources/utils/androidChatHeadReplyTask';
 
-AppRegistry.registerHeadlessTask(
-  ANDROID_CHAT_HEAD_REPLY_TASK,
-  () => runAndroidChatHeadReplyTask,
-);
+if (typeof AppRegistry.registerHeadlessTask === 'function') {
+  AppRegistry.registerHeadlessTask(
+    ANDROID_CHAT_HEAD_REPLY_TASK,
+    () => runAndroidChatHeadReplyTask,
+  );
+}
 
 const appContext = require.context(
   './sources/app',
