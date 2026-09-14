@@ -1,14 +1,14 @@
-# Happy Codex Windows installer
+# Agentic Messenger Windows installer
 
-This folder builds a Windows installer executable for Happy Codex.
+This folder builds a Windows installer executable for Agentic Messenger.
 
 The installer:
 
 - Installs Node.js LTS with `winget` if Node/npm are missing.
 - Installs or updates `happy` and `@openai/codex` with npm, skipping packages that are already current.
 - Sets the user environment variable `HAPPY_WEBAPP_URL` to `https://queued-tablet-2f9v.here.now/`.
-- Creates Desktop and Start Menu shortcuts for Happy Codex and Happy Web.
-- Installs a Happy Codex tray controller for start/stop/restart daemon, login, updates, doctor, logs, and Happy Web.
+- Creates Desktop and Start Menu shortcuts for Agentic Messenger and Agentic Messenger Web.
+- Installs an Agentic Messenger tray controller for start/stop/restart daemon, login, updates, doctor, logs, and Agentic Messenger Web.
 - Adds a Startup shortcut that launches the tray controller through `wscript.exe`, starts the Happy daemon hidden, retries if it is not running, and does not show a command prompt when Windows signs in.
 - Runs the interactive Codex and Happy login/start flow.
 
@@ -22,8 +22,8 @@ powershell.exe -ExecutionPolicy Bypass -File .\installer\windows\build.ps1
 The generated installer is written to:
 
 ```text
-dist\windows\HappyCodexSetup.exe
+dist\windows\AgenticMessengerSetup.exe
 ```
 
 For silent-ish refreshes after installation, users can run the Start Menu shortcut named
-`Update and Login Happy Codex`.
+`Update and Login Agentic Messenger`.

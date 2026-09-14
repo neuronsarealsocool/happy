@@ -11,11 +11,14 @@ try {
 catch {
 }
 
-$AppName = "Happy Codex"
-$HappyWebUrl = "https://queued-tablet-2f9v.here.now/"
-$InstallDir = Join-Path $env:LOCALAPPDATA "HappyCodex"
+$AppName = "Agentic Messenger"
+$AppKey = "AgenticMessenger"
+$AgenticMessengerWebUrl = "https://queued-tablet-2f9v.here.now/"
+$LegacyInstallDir = Join-Path $env:LOCALAPPDATA "HappyCodex"
+$InstallDir = Join-Path $env:LOCALAPPDATA $AppKey
 $LogDir = Join-Path $InstallDir "logs"
-$StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Happy Codex"
+$StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Agentic Messenger"
+$LegacyStartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Happy Codex"
 $StartupDir = [Environment]::GetFolderPath("Startup")
 $DesktopDir = [Environment]::GetFolderPath("DesktopDirectory")
 $TranscriptPath = Join-Path $LogDir ("install-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
@@ -27,6 +30,7 @@ if ($RawArgs -contains "-NoPause") { $NoPause = $true }
 $IsCompiledExe = $CommandPath -and (Test-Path $CommandPath) -and ([IO.Path]::GetExtension($CommandPath) -ieq ".exe")
 $TranscriptStarted = $false
 $BundledTrayScript = $null
+$BundledIconBase64 = $null
 
 New-Item -ItemType Directory -Force -Path $InstallDir, $LogDir, $StartMenuDir | Out-Null
 if (-not $IsCompiledExe) {
@@ -74,6 +78,41 @@ function Add-UserPathEntry {
     }
 
     Refresh-Path
+}
+
+function Remove-LegacyInstallEntries {
+    $legacyTrayScript = Join-Path $LegacyInstallDir "Tray-HappyCodex.ps1"
+    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($legacyTrayScript) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+    $legacyPaths = @(
+        (Join-Path $DesktopDir "Happy Codex.lnk"),
+        (Join-Path $DesktopDir "Happy Web.url"),
+        (Join-Path $StartupDir "Happy Codex Tray.lnk"),
+        (Join-Path $StartupDir "Happy Codex Daemon.lnk"),
+        (Join-Path $LegacyInstallDir "HappyCodexSetup.exe"),
+        (Join-Path $LegacyInstallDir "Start-HappyCodex.cmd"),
+        (Join-Path $LegacyInstallDir "Start-HappyCodexTray.vbs"),
+        (Join-Path $LegacyInstallDir "Start-HappyDaemon.cmd"),
+        (Join-Path $LegacyInstallDir "Tray-HappyCodex.ps1"),
+        (Join-Path $LegacyInstallDir "Update-HappyCodex.cmd")
+    )
+
+    foreach ($path in $legacyPaths) {
+        Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path $LegacyStartMenuDir) {
+        Remove-Item -LiteralPath $LegacyStartMenuDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path $LegacyInstallDir) {
+        $remaining = Get-ChildItem -LiteralPath $LegacyInstallDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $remaining) {
+            Remove-Item -LiteralPath $LegacyInstallDir -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Invoke-Logged {
@@ -187,7 +226,7 @@ function Get-LatestPackageVersion {
     return ($version | Select-Object -First 1).Trim()
 }
 
-function Stop-HappyDaemonForUpdate {
+function Stop-AgenticMessengerDaemonForUpdate {
     $happy = Find-CommandPath @("happy.cmd", "happy")
     if ($happy) {
         Invoke-Logged $happy @("daemon", "stop") -AllowFailure | Out-Null
@@ -260,7 +299,7 @@ function Install-OrUpdateCliTools {
     }
 
     if ($updates.Count -gt 0) {
-        Stop-HappyDaemonForUpdate
+        Stop-AgenticMessengerDaemonForUpdate
         Invoke-Logged $npm (@("install", "-g") + $updates)
     }
     else {
@@ -281,7 +320,7 @@ set "PATH=%APPDATA%\npm;%LOCALAPPDATA%\OpenAI\Codex\bin;%PATH%"
 where happy.cmd >nul 2>nul
 if errorlevel 1 (
   echo Happy is not installed yet.
-  echo Run the Happy Codex installer or this command:
+  echo Run the Agentic Messenger installer or this command:
   echo npm install -g happy
   pause
   exit /b 1
@@ -302,7 +341,7 @@ cd /d "%USERPROFILE%"
 call happy.cmd codex
 
 echo.
-echo Happy Codex closed.
+echo Agentic Messenger closed.
 pause
 '@
 
@@ -316,26 +355,26 @@ set "PATH=%APPDATA%\npm;%LOCALAPPDATA%\OpenAI\Codex\bin;%PATH%"
 where happy.cmd >nul 2>nul
 if errorlevel 1 exit /b 0
 
-call happy.cmd daemon start > "%LOCALAPPDATA%\HappyCodex\logs\daemon-startup.log" 2>&1
+call happy.cmd daemon start > "%LOCALAPPDATA%\AgenticMessenger\logs\daemon-startup.log" 2>&1
 exit /b 0
 '@
 
     $trayLauncherScript = @'
 Set shell = CreateObject("WScript.Shell")
-installDir = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\HappyCodex"
-command = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & installDir & "\Tray-HappyCodex.ps1"" -StartDaemon"
+installDir = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\AgenticMessenger"
+command = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & installDir & "\Tray-AgenticMessenger.ps1"" -StartDaemon"
 shell.Run command, 0, False
 '@
 
-    $trayTarget = Join-Path $InstallDir "Tray-HappyCodex.ps1"
+    $trayTarget = Join-Path $InstallDir "Tray-AgenticMessenger.ps1"
     if ($BundledTrayScript) {
         Set-Content -Path $trayTarget -Value $BundledTrayScript -Encoding UTF8
     }
     else {
         $traySourceCandidates = @(
-            (Join-Path $PSScriptRoot "Tray-HappyCodex.ps1"),
-            (Join-Path (Split-Path -Parent $CommandPath) "Tray-HappyCodex.ps1"),
-            (Join-Path (Get-Location) "Tray-HappyCodex.ps1")
+            (Join-Path $PSScriptRoot "Tray-AgenticMessenger.ps1"),
+            (Join-Path (Split-Path -Parent $CommandPath) "Tray-AgenticMessenger.ps1"),
+            (Join-Path (Get-Location) "Tray-AgenticMessenger.ps1")
         )
 
         $traySource = $traySourceCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
@@ -343,19 +382,23 @@ shell.Run command, 0, False
             Copy-Item -LiteralPath $traySource -Destination $trayTarget -Force
         }
         else {
-            Write-Host "Warning: Tray-HappyCodex.ps1 was not found; tray shortcuts will be created after the next update."
+            Write-Host "Warning: Tray-AgenticMessenger.ps1 was not found; tray shortcuts will be created after the next update."
         }
     }
 
-    $installedExe = Join-Path $InstallDir "HappyCodexSetup.exe"
-    $installedPs1 = Join-Path $InstallDir "Setup-HappyCodex.ps1"
+    if ($BundledIconBase64) {
+        [IO.File]::WriteAllBytes((Join-Path $InstallDir "AgenticMessenger.ico"), [Convert]::FromBase64String($BundledIconBase64))
+    }
+
+    $installedExe = Join-Path $InstallDir "AgenticMessengerSetup.exe"
+    $installedPs1 = Join-Path $InstallDir "Setup-AgenticMessenger.ps1"
 
     if ($IsCompiledExe) {
         Copy-Item -LiteralPath $CommandPath -Destination $installedExe -Force
         $updateScript = @"
 @echo off
 setlocal
-set "installer=%LOCALAPPDATA%\HappyCodex\HappyCodexSetup.exe"
+set "installer=%LOCALAPPDATA%\AgenticMessenger\AgenticMessengerSetup.exe"
 if not exist "%installer%" (
   echo Installer executable was not found: %installer%
   pause
@@ -369,7 +412,7 @@ if not exist "%installer%" (
         $updateScript = @'
 @echo off
 setlocal
-set "installer=%LOCALAPPDATA%\HappyCodex\Setup-HappyCodex.ps1"
+set "installer=%LOCALAPPDATA%\AgenticMessenger\Setup-AgenticMessenger.ps1"
 if not exist "%installer%" (
   echo Installer script was not found: %installer%
   pause
@@ -379,10 +422,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%installer%"
 '@
     }
 
-    Set-Content -Path (Join-Path $InstallDir "Start-HappyCodex.cmd") -Value $startScript -Encoding ASCII
-    Set-Content -Path (Join-Path $InstallDir "Start-HappyDaemon.cmd") -Value $daemonScript -Encoding ASCII
-    Set-Content -Path (Join-Path $InstallDir "Start-HappyCodexTray.vbs") -Value $trayLauncherScript -Encoding ASCII
-    Set-Content -Path (Join-Path $InstallDir "Update-HappyCodex.cmd") -Value $updateScript -Encoding ASCII
+    Set-Content -Path (Join-Path $InstallDir "Start-AgenticMessenger.cmd") -Value $startScript -Encoding ASCII
+    Set-Content -Path (Join-Path $InstallDir "Start-AgenticMessengerDaemon.cmd") -Value $daemonScript -Encoding ASCII
+    Set-Content -Path (Join-Path $InstallDir "Start-AgenticMessengerTray.vbs") -Value $trayLauncherScript -Encoding ASCII
+    Set-Content -Path (Join-Path $InstallDir "Update-AgenticMessenger.cmd") -Value $updateScript -Encoding ASCII
 }
 
 function New-Shortcut {
@@ -391,7 +434,8 @@ function New-Shortcut {
         [string]$TargetPath,
         [string]$Arguments = "",
         [string]$WorkingDirectory = $InstallDir,
-        [string]$Description = $AppName
+        [string]$Description = $AppName,
+        [string]$IconLocation = (Join-Path $InstallDir "AgenticMessenger.ico")
     )
 
     $shell = New-Object -ComObject WScript.Shell
@@ -400,6 +444,9 @@ function New-Shortcut {
     $shortcut.Arguments = $Arguments
     $shortcut.WorkingDirectory = $WorkingDirectory
     $shortcut.Description = $Description
+    if ($IconLocation -and (Test-Path $IconLocation)) {
+        $shortcut.IconLocation = $IconLocation
+    }
     $shortcut.Save()
 }
 
@@ -408,7 +455,9 @@ function New-WebShortcut {
 
     $content = @"
 [InternetShortcut]
-URL=$HappyWebUrl
+URL=$AgenticMessengerWebUrl
+IconFile=$InstallDir\AgenticMessenger.ico
+IconIndex=0
 "@
     Set-Content -Path $Path -Value $content -Encoding ASCII
 }
@@ -418,31 +467,33 @@ function Install-Shortcuts {
 
     $cmd = Join-Path $env:WINDIR "System32\cmd.exe"
     $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
-    $startArgs = "/k `"$InstallDir\Start-HappyCodex.cmd`""
-    $updateArgs = "/k `"$InstallDir\Update-HappyCodex.cmd`""
-    $trayVbsArgs = "`"$InstallDir\Start-HappyCodexTray.vbs`""
+    $startArgs = "/k `"$InstallDir\Start-AgenticMessenger.cmd`""
+    $updateArgs = "/k `"$InstallDir\Update-AgenticMessenger.cmd`""
+    $trayVbsArgs = "`"$InstallDir\Start-AgenticMessengerTray.vbs`""
 
-    New-Shortcut -Path (Join-Path $StartMenuDir "Happy Codex.lnk") -TargetPath $cmd -Arguments $startArgs
-    New-Shortcut -Path (Join-Path $StartMenuDir "Happy Codex Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
-    New-Shortcut -Path (Join-Path $StartMenuDir "Update and Login Happy Codex.lnk") -TargetPath $cmd -Arguments $updateArgs
-    New-WebShortcut -Path (Join-Path $StartMenuDir "Happy Web.url")
+    Remove-LegacyInstallEntries
 
-    New-Shortcut -Path (Join-Path $DesktopDir "Happy Codex.lnk") -TargetPath $cmd -Arguments $startArgs
-    New-WebShortcut -Path (Join-Path $DesktopDir "Happy Web.url")
+    New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger.lnk") -TargetPath $cmd -Arguments $startArgs
+    New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
+    New-Shortcut -Path (Join-Path $StartMenuDir "Update and Login Agentic Messenger.lnk") -TargetPath $cmd -Arguments $updateArgs
+    New-WebShortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Web.url")
+
+    New-Shortcut -Path (Join-Path $DesktopDir "Agentic Messenger.lnk") -TargetPath $cmd -Arguments $startArgs
+    New-WebShortcut -Path (Join-Path $DesktopDir "Agentic Messenger Web.url")
 
     if (-not $NoStartup) {
-        Remove-Item -LiteralPath (Join-Path $StartupDir "Happy Codex Daemon.lnk") -ErrorAction SilentlyContinue
-        New-Shortcut -Path (Join-Path $StartupDir "Happy Codex Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
+        Remove-Item -LiteralPath (Join-Path $StartupDir "Agentic Messenger Daemon.lnk") -ErrorAction SilentlyContinue
+        New-Shortcut -Path (Join-Path $StartupDir "Agentic Messenger Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
     }
 }
 
 function Configure-HappyEnvironment {
-    Write-Step "Configuring Happy web URL"
-    [Environment]::SetEnvironmentVariable("HAPPY_WEBAPP_URL", $HappyWebUrl, "User")
-    $env:HAPPY_WEBAPP_URL = $HappyWebUrl
+    Write-Step "Configuring Agentic Messenger web URL"
+    [Environment]::SetEnvironmentVariable("HAPPY_WEBAPP_URL", $AgenticMessengerWebUrl, "User")
+    $env:HAPPY_WEBAPP_URL = $AgenticMessengerWebUrl
 }
 
-function Start-HappyDaemon {
+function Start-AgenticMessengerDaemon {
     Write-Step "Starting Happy daemon"
     $happy = Find-CommandPath @("happy.cmd", "happy")
     if (-not $happy) {
@@ -475,13 +526,13 @@ function Start-LoginFlow {
     Write-Host "Opening Happy login. Choose Mobile App or Web Browser when prompted."
     Invoke-Logged $happy @("auth", "login") -AllowFailure
 
-    Write-Host "Opening Happy Codex once so you can confirm it works."
+    Write-Host "Opening Agentic Messenger once so you can confirm it works."
     Invoke-Logged $happy @("codex") -AllowFailure
 }
 
 try {
     Write-Host "$AppName installer"
-    Write-Host "Happy web: $HappyWebUrl"
+    Write-Host "Agentic Messenger web: $AgenticMessengerWebUrl"
     Write-Host "Install dir: $InstallDir"
 
     Install-NodeIfNeeded
@@ -489,13 +540,13 @@ try {
     Configure-HappyEnvironment
     Write-InstalledScripts
     Install-Shortcuts
-    Start-HappyDaemon
+    Start-AgenticMessengerDaemon
     Start-LoginFlow
 
     Write-Step "Done"
-    Write-Host "Happy Codex has been installed."
-    Write-Host "Use the Happy Codex desktop shortcut to start a Codex session."
-    Write-Host "Use the Happy Web shortcut to open $HappyWebUrl."
+    Write-Host "Agentic Messenger has been installed."
+    Write-Host "Use the Agentic Messenger desktop shortcut to start a Codex session."
+    Write-Host "Use the Agentic Messenger Web shortcut to open $AgenticMessengerWebUrl."
 }
 catch {
     Write-Host ""

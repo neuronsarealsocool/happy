@@ -1,22 +1,24 @@
 param(
     [switch]$StartDaemon,
-    [ValidateSet("StartDaemon", "StopDaemon", "RestartDaemon", "OpenHappyCodex", "OpenHappyWeb", "LoginHappy", "LoginCodex", "UpdateEverything", "Doctor", "OpenLogs", "SelfTest")]
+    [ValidateSet("StartDaemon", "StopDaemon", "RestartDaemon", "OpenAgenticMessenger", "OpenAgenticMessengerWeb", "LoginHappy", "LoginCodex", "UpdateEverything", "Doctor", "OpenLogs", "SelfTest")]
     [string]$Action
 )
 
 $ErrorActionPreference = "Stop"
 
-$AppName = "Happy Codex"
-$HappyWebUrl = "https://queued-tablet-2f9v.here.now/"
-$InstallDir = Join-Path $env:LOCALAPPDATA "HappyCodex"
+$AppName = "Agentic Messenger"
+$AppKey = "AgenticMessenger"
+$AgenticMessengerWebUrl = "https://queued-tablet-2f9v.here.now/"
+$InstallDir = Join-Path $env:LOCALAPPDATA $AppKey
 $LogDir = Join-Path $InstallDir "logs"
-$Launcher = Join-Path $InstallDir "Start-HappyCodex.cmd"
-$DaemonLauncher = Join-Path $InstallDir "Start-HappyDaemon.cmd"
+$Launcher = Join-Path $InstallDir "Start-AgenticMessenger.cmd"
+$DaemonLauncher = Join-Path $InstallDir "Start-AgenticMessengerDaemon.cmd"
+$TrayIconPath = Join-Path $InstallDir "AgenticMessenger.ico"
 
 New-Item -ItemType Directory -Force -Path $InstallDir, $LogDir | Out-Null
 
 function Set-HappyEnvironment {
-    $env:HAPPY_WEBAPP_URL = $HappyWebUrl
+    $env:HAPPY_WEBAPP_URL = $AgenticMessengerWebUrl
     $env:Path = @(
         (Join-Path $env:APPDATA "npm"),
         (Join-Path $env:LOCALAPPDATA "OpenAI\Codex\bin"),
@@ -125,7 +127,7 @@ function Show-Balloon {
     $Icon.ShowBalloonTip(2500)
 }
 
-function Start-HappyDaemon {
+function Start-AgenticMessengerDaemon {
     $happy = Find-CommandPath @("happy.cmd", "happy")
     if (-not $happy) {
         return $false
@@ -136,7 +138,7 @@ function Start-HappyDaemon {
     return (Wait-HappyDaemonRunning)
 }
 
-function Stop-HappyDaemon {
+function Stop-AgenticMessengerDaemon {
     $happy = Find-CommandPath @("happy.cmd", "happy")
     if (-not $happy) {
         return $false
@@ -147,17 +149,17 @@ function Stop-HappyDaemon {
     return ($exitCode -eq 0 -and (Wait-HappyDaemonStopped))
 }
 
-function Open-HappyCodex {
+function Open-AgenticMessenger {
     if (Test-Path $Launcher) {
         Start-Process -FilePath $Launcher -WorkingDirectory $InstallDir | Out-Null
         return
     }
 
-    Start-ConsoleCommand "Happy Codex" "happy.cmd codex"
+    Start-ConsoleCommand "Agentic Messenger" "happy.cmd codex"
 }
 
-function Open-HappyWeb {
-    Start-Process $HappyWebUrl | Out-Null
+function Open-AgenticMessengerWeb {
+    Start-Process $AgenticMessengerWebUrl | Out-Null
 }
 
 function Open-HappyLogin {
@@ -169,13 +171,13 @@ function Open-CodexLogin {
 }
 
 function Update-Everything {
-    $updater = Join-Path $InstallDir "Update-HappyCodex.cmd"
+    $updater = Join-Path $InstallDir "Update-AgenticMessenger.cmd"
     if (Test-Path $updater) {
         Start-Process -FilePath $updater -WorkingDirectory $InstallDir | Out-Null
         return
     }
 
-    $installer = Join-Path $InstallDir "HappyCodexSetup.exe"
+    $installer = Join-Path $InstallDir "AgenticMessengerSetup.exe"
     if (Test-Path $installer) {
         Start-Process -FilePath $installer -WorkingDirectory $InstallDir | Out-Null
         return
@@ -188,37 +190,42 @@ function Update-Everything {
     }
 
     $command = "`"$npm`" install -g happy @openai/codex && happy.cmd daemon start && echo. && echo Update complete."
-    Start-ConsoleCommand "Update Happy Codex" $command
+    Start-ConsoleCommand "Update Agentic Messenger" $command
 }
 
 function Open-Doctor {
-    Start-ConsoleCommand "Happy Codex Doctor" "happy.cmd doctor && echo. && codex.cmd doctor --summary"
+    Start-ConsoleCommand "Agentic Messenger Doctor" "happy.cmd doctor && echo. && codex.cmd doctor --summary"
 }
 
 function Open-Logs {
     Invoke-Item $LogDir
 }
 
-function Test-HappyCodexTray {
+function Test-AgenticMessengerTray {
     Set-HappyEnvironment
 
     $happy = Find-CommandPath @("happy.cmd", "happy")
     $codex = Find-CommandPath @("codex.cmd", "codex")
-    $updater = Join-Path $InstallDir "Update-HappyCodex.cmd"
-    $trayVbs = Join-Path $InstallDir "Start-HappyCodexTray.vbs"
-    $startupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Tray.lnk"
-    $startupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Daemon.lnk"
+    $updater = Join-Path $InstallDir "Update-AgenticMessenger.cmd"
+    $trayVbs = Join-Path $InstallDir "Start-AgenticMessengerTray.vbs"
+    $startupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Tray.lnk"
+    $startupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Daemon.lnk"
+    $legacyStartupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Tray.lnk"
+    $legacyStartupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Daemon.lnk"
 
     $checks = @(
         [pscustomobject]@{ Name = "Happy CLI"; Ok = [bool]$happy; Detail = $happy },
         [pscustomobject]@{ Name = "Codex CLI"; Ok = [bool]$codex; Detail = $codex },
-        [pscustomobject]@{ Name = "Happy Codex launcher"; Ok = (Test-Path $Launcher); Detail = $Launcher },
+        [pscustomobject]@{ Name = "Agentic Messenger launcher"; Ok = (Test-Path $Launcher); Detail = $Launcher },
         [pscustomobject]@{ Name = "Daemon launcher"; Ok = (Test-Path $DaemonLauncher); Detail = $DaemonLauncher },
         [pscustomobject]@{ Name = "Updater launcher"; Ok = (Test-Path $updater); Detail = $updater },
         [pscustomobject]@{ Name = "Hidden tray startup launcher"; Ok = (Test-Path $trayVbs); Detail = $trayVbs },
         [pscustomobject]@{ Name = "Tray startup shortcut"; Ok = (Test-Path $startupTray); Detail = $startupTray },
-        [pscustomobject]@{ Name = "Legacy daemon startup shortcut removed"; Ok = (-not (Test-Path $startupDaemon)); Detail = $startupDaemon },
-        [pscustomobject]@{ Name = "Happy web URL"; Ok = ($HappyWebUrl -eq "https://queued-tablet-2f9v.here.now/"); Detail = $HappyWebUrl }
+        [pscustomobject]@{ Name = "Daemon startup shortcut removed"; Ok = (-not (Test-Path $startupDaemon)); Detail = $startupDaemon },
+        [pscustomobject]@{ Name = "Legacy Happy Codex tray startup removed"; Ok = (-not (Test-Path $legacyStartupTray)); Detail = $legacyStartupTray },
+        [pscustomobject]@{ Name = "Legacy Happy Codex daemon startup removed"; Ok = (-not (Test-Path $legacyStartupDaemon)); Detail = $legacyStartupDaemon },
+        [pscustomobject]@{ Name = "Tray icon"; Ok = (Test-Path $TrayIconPath); Detail = $TrayIconPath },
+        [pscustomobject]@{ Name = "Agentic Messenger web URL"; Ok = ($AgenticMessengerWebUrl -eq "https://queued-tablet-2f9v.here.now/"); Detail = $AgenticMessengerWebUrl }
     )
 
     foreach ($check in $checks) {
@@ -240,24 +247,24 @@ function Invoke-TrayAction {
 
     switch ($Name) {
         "StartDaemon" {
-            if (-not (Start-HappyDaemon)) { exit 1 }
+            if (-not (Start-AgenticMessengerDaemon)) { exit 1 }
         }
         "StopDaemon" {
-            if (-not (Stop-HappyDaemon)) { exit 1 }
+            if (-not (Stop-AgenticMessengerDaemon)) { exit 1 }
         }
         "RestartDaemon" {
-            Stop-HappyDaemon | Out-Null
+            Stop-AgenticMessengerDaemon | Out-Null
             Start-Sleep -Seconds 2
-            if (-not (Start-HappyDaemon)) { exit 1 }
+            if (-not (Start-AgenticMessengerDaemon)) { exit 1 }
         }
-        "OpenHappyCodex" { Open-HappyCodex }
-        "OpenHappyWeb" { Open-HappyWeb }
+        "OpenAgenticMessenger" { Open-AgenticMessenger }
+        "OpenAgenticMessengerWeb" { Open-AgenticMessengerWeb }
         "LoginHappy" { Open-HappyLogin }
         "LoginCodex" { Open-CodexLogin }
         "UpdateEverything" { Update-Everything }
         "Doctor" { Open-Doctor }
         "OpenLogs" { Open-Logs }
-        "SelfTest" { Test-HappyCodexTray }
+        "SelfTest" { Test-AgenticMessengerTray }
     }
 }
 
@@ -274,7 +281,12 @@ Add-Type -AssemblyName System.Drawing
 
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $notifyIcon.Text = $AppName
-$notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+if (Test-Path $TrayIconPath) {
+    $notifyIcon.Icon = New-Object System.Drawing.Icon($TrayIconPath)
+}
+else {
+    $notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+}
 $notifyIcon.Visible = $true
 $script:KeepDaemonRunning = [bool]$StartDaemon
 
@@ -292,32 +304,32 @@ function Add-MenuItem {
     [void]$menu.Items.Add($item)
 }
 
-Add-MenuItem "Open Happy Web" { Open-HappyWeb }
+Add-MenuItem "Open Agentic Messenger Web" { Open-AgenticMessengerWeb }
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 Add-MenuItem "Start Daemon" {
     $script:KeepDaemonRunning = $true
-    if (Start-HappyDaemon) {
-        Show-Balloon $notifyIcon "Happy Codex" "Daemon start requested."
+    if (Start-AgenticMessengerDaemon) {
+        Show-Balloon $notifyIcon $AppName "Daemon start requested."
     }
     else {
-        Show-Balloon $notifyIcon "Happy Codex" "Happy CLI was not found. Run Update Everything."
+        Show-Balloon $notifyIcon $AppName "Happy CLI was not found. Run Update Everything."
     }
 }
 Add-MenuItem "Stop Daemon" {
     $script:KeepDaemonRunning = $false
-    if (Stop-HappyDaemon) {
-        Show-Balloon $notifyIcon "Happy Codex" "Daemon stop requested."
+    if (Stop-AgenticMessengerDaemon) {
+        Show-Balloon $notifyIcon $AppName "Daemon stop requested."
     }
     else {
-        Show-Balloon $notifyIcon "Happy Codex" "Happy CLI was not found."
+        Show-Balloon $notifyIcon $AppName "Happy CLI was not found."
     }
 }
 Add-MenuItem "Restart Daemon" {
     $script:KeepDaemonRunning = $true
-    Stop-HappyDaemon | Out-Null
+    Stop-AgenticMessengerDaemon | Out-Null
     Start-Sleep -Seconds 2
-    Start-HappyDaemon | Out-Null
-    Show-Balloon $notifyIcon "Happy Codex" "Daemon restart requested."
+    Start-AgenticMessengerDaemon | Out-Null
+    Show-Balloon $notifyIcon $AppName "Daemon restart requested."
 }
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 Add-MenuItem "Login to Happy" { Open-HappyLogin }
@@ -333,20 +345,20 @@ Add-MenuItem "Exit Tray" {
 }
 
 $notifyIcon.ContextMenuStrip = $menu
-$notifyIcon.Add_DoubleClick({ Open-HappyCodex })
+$notifyIcon.Add_DoubleClick({ Open-AgenticMessengerWeb })
 
 $daemonTimer = New-Object System.Windows.Forms.Timer
 $daemonTimer.Interval = 30000
 $daemonTimer.Add_Tick({
     if ($script:KeepDaemonRunning -and -not (Test-HappyDaemonRunning)) {
-        Start-HappyDaemon | Out-Null
+        Start-AgenticMessengerDaemon | Out-Null
     }
 })
 $daemonTimer.Start()
 
 if ($StartDaemon) {
-    Start-HappyDaemon | Out-Null
+    Start-AgenticMessengerDaemon | Out-Null
 }
 
-Show-Balloon $notifyIcon "Happy Codex" "Tray controller is running."
+Show-Balloon $notifyIcon $AppName "Tray controller is running."
 [System.Windows.Forms.Application]::Run()
