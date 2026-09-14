@@ -51,11 +51,26 @@ function Start-ConsoleCommand {
 
 function Start-HiddenCommand {
     param(
-        [string]$Command,
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$LogPath,
         [switch]$Wait
     )
 
-    $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/d /s /c `"$Command`"" -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE -PassThru
+    $startArgs = @{
+        FilePath = $FilePath
+        ArgumentList = $Arguments
+        WindowStyle = "Hidden"
+        WorkingDirectory = $env:USERPROFILE
+        PassThru = $true
+    }
+
+    if ($LogPath) {
+        $startArgs.RedirectStandardOutput = $LogPath
+        $startArgs.RedirectStandardError = "$LogPath.err"
+    }
+
+    $process = Start-Process @startArgs
     if ($Wait) {
         $process.WaitForExit()
         return $process.ExitCode
@@ -117,7 +132,7 @@ function Start-HappyDaemon {
     }
 
     $log = Join-Path $LogDir "daemon-startup.log"
-    Start-HiddenCommand "`"$happy`" daemon start > `"$log`" 2>&1" | Out-Null
+    Start-HiddenCommand $happy @("daemon", "start") $log | Out-Null
     return (Wait-HappyDaemonRunning)
 }
 
@@ -128,7 +143,7 @@ function Stop-HappyDaemon {
     }
 
     $log = Join-Path $LogDir "daemon-stop.log"
-    $exitCode = Start-HiddenCommand "`"$happy`" daemon stop > `"$log`" 2>&1" -Wait
+    $exitCode = Start-HiddenCommand $happy @("daemon", "stop") $log -Wait
     return ($exitCode -eq 0 -and (Wait-HappyDaemonStopped))
 }
 
@@ -261,6 +276,7 @@ $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $notifyIcon.Text = $AppName
 $notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
 $notifyIcon.Visible = $true
+$script:KeepDaemonRunning = [bool]$StartDaemon
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
@@ -276,10 +292,10 @@ function Add-MenuItem {
     [void]$menu.Items.Add($item)
 }
 
-Add-MenuItem "Open Happy Codex" { Open-HappyCodex }
 Add-MenuItem "Open Happy Web" { Open-HappyWeb }
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 Add-MenuItem "Start Daemon" {
+    $script:KeepDaemonRunning = $true
     if (Start-HappyDaemon) {
         Show-Balloon $notifyIcon "Happy Codex" "Daemon start requested."
     }
@@ -288,6 +304,7 @@ Add-MenuItem "Start Daemon" {
     }
 }
 Add-MenuItem "Stop Daemon" {
+    $script:KeepDaemonRunning = $false
     if (Stop-HappyDaemon) {
         Show-Balloon $notifyIcon "Happy Codex" "Daemon stop requested."
     }
@@ -296,6 +313,7 @@ Add-MenuItem "Stop Daemon" {
     }
 }
 Add-MenuItem "Restart Daemon" {
+    $script:KeepDaemonRunning = $true
     Stop-HappyDaemon | Out-Null
     Start-Sleep -Seconds 2
     Start-HappyDaemon | Out-Null
@@ -316,6 +334,15 @@ Add-MenuItem "Exit Tray" {
 
 $notifyIcon.ContextMenuStrip = $menu
 $notifyIcon.Add_DoubleClick({ Open-HappyCodex })
+
+$daemonTimer = New-Object System.Windows.Forms.Timer
+$daemonTimer.Interval = 30000
+$daemonTimer.Add_Tick({
+    if ($script:KeepDaemonRunning -and -not (Test-HappyDaemonRunning)) {
+        Start-HappyDaemon | Out-Null
+    }
+})
+$daemonTimer.Start()
 
 if ($StartDaemon) {
     Start-HappyDaemon | Out-Null

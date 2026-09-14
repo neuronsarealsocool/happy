@@ -92,9 +92,25 @@ function Invoke-Logged {
 }
 
 function Start-HiddenCommand {
-    param([string]$Command)
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [string]$LogPath
+    )
 
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/d /s /c `"$Command`"" -WindowStyle Hidden -WorkingDirectory $env:USERPROFILE | Out-Null
+    $startArgs = @{
+        FilePath = $FilePath
+        ArgumentList = $Arguments
+        WindowStyle = "Hidden"
+        WorkingDirectory = $env:USERPROFILE
+    }
+
+    if ($LogPath) {
+        $startArgs.RedirectStandardOutput = $LogPath
+        $startArgs.RedirectStandardError = "$LogPath.err"
+    }
+
+    Start-Process @startArgs | Out-Null
 }
 
 function Test-HappyDaemonRunning {
@@ -435,7 +451,7 @@ function Start-HappyDaemon {
 
     $log = Join-Path $LogDir "daemon-startup.log"
     Write-Host "> $happy daemon start"
-    Start-HiddenCommand "`"$happy`" daemon start > `"$log`" 2>&1"
+    Start-HiddenCommand $happy @("daemon", "start") $log
     if (-not (Wait-HappyDaemonRunning)) {
         throw "Happy daemon did not report as running. Log file: $log"
     }
