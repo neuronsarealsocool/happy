@@ -44,7 +44,7 @@ export default function AccessibilitySettingsScreen() {
         <ItemList style={{ paddingTop: 0 }}>
             <ItemGroup
                 title="Accessibility"
-                footer="Shortcuts are optimized for Microsoft Edge on Windows and synced with your Happy account."
+                footer="Shortcuts are optimized for Microsoft Edge on Windows and synced with your AgenticMessenger account."
             >
                 <Item
                     title="Keyboard shortcuts"

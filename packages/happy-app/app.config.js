@@ -2,9 +2,9 @@ const { execFileSync } = require('node:child_process');
 
 const variant = process.env.APP_ENV || 'development';
 const name = {
-    development: "Happy (dev)",
-    preview: "Happy (preview)",
-    production: "Happy"
+    development: "AgenticMessenger (dev)",
+    preview: "AgenticMessenger (preview)",
+    production: "AgenticMessenger"
 }[variant];
 const bundleId = {
     development: "com.slopus.happy.dev",
@@ -95,7 +95,7 @@ export default {
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
                 monochromeImage: "./sources/assets/images/icon-monochrome.png",
-                backgroundColor: "#000000"
+                backgroundColor: "#F4F7FB"
             },
             permissions: [
                 "android.permission.RECORD_AUDIO",

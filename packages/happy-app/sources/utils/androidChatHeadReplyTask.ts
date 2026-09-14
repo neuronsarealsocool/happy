@@ -26,7 +26,7 @@ export async function drainAndroidChatHeadReplies(sessionId: string) {
         await sodium.ready;
         const credentials = await TokenStorage.getCredentials();
         if (!credentials) {
-            throw new Error('Happy is not signed in');
+            throw new Error('AgenticMessenger is not signed in');
         }
         console.warn(`[chat-head] ${sessionId}: restoring targeted sync`);
         await syncRestoreForChatHead(credentials, sessionId);
@@ -63,7 +63,7 @@ async function refreshAndroidChatHeadSession(sessionId: string) {
     await sodium.ready;
     const credentials = await TokenStorage.getCredentials();
     if (!credentials) {
-        throw new Error('Happy is not signed in');
+        throw new Error('AgenticMessenger is not signed in');
     }
     await syncRestoreForChatHead(credentials, sessionId);
     await sync.refreshChatHeadSession(sessionId);

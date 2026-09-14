@@ -10,6 +10,6 @@ The SVG files are the editable source of truth for the selected AgenticMessenger
 
 The generated pack includes 1024px app/adaptive masters, Android monochrome and
 notification images, 512px and 192px web icons, a 256px chat-head image, 48px
-and 32px favicons, and a 2200px horizontal wordmark.
+and 32px favicons, an active favicon, and dark/light horizontal wordmarks.
 
 Run `node scripts/generate-agentic-messenger-assets.mjs` from the repository root after editing an SVG source.

@@ -2,8 +2,8 @@
  * Simple utility for switching between normal and active favicons
  */
 
-const FAVICON_NORMAL = '/favicon.ico';
-const FAVICON_ACTIVE = '/favicon-active.ico';
+const FAVICON_NORMAL = '/favicon.png';
+const FAVICON_ACTIVE = '/favicon-active.png';
 
 /**
  * Updates the favicon in the document

@@ -197,7 +197,7 @@ export function useStartSessionFromDraft() {
                 if (result.type === 'pending') {
                     Modal.alert(
                         t('common.error'),
-                        'Rig created the session, but it is still syncing with Happy. It should appear shortly.',
+                        'Rig created the session, but it is still syncing with AgenticMessenger. It should appear shortly.',
                     );
                     return null;
                 }

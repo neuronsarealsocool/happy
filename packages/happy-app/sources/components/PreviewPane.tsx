@@ -646,7 +646,7 @@ function friendlyReadError(error: string | undefined, title: string): string {
     }
 
     if (/Access denied|outside the working directory/i.test(error)) {
-        return 'This artifact is outside the session folder, so Happy cannot preview it here.';
+        return 'This artifact is outside the session folder, so AgenticMessenger cannot preview it here.';
     }
 
     return error;

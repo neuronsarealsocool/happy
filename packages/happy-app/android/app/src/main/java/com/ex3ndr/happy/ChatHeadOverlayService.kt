@@ -111,7 +111,7 @@ class ChatHeadOverlayService : Service() {
             refreshVisibleSession(intent.getStringExtra(EXTRA_SESSION_ID).orEmpty())
             return START_NOT_STICKY
         }
-        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "Happy" }
+        val title = intent?.getStringExtra(EXTRA_TITLE).orEmpty().ifBlank { "AgenticMessenger" }
         val body = intent?.getStringExtra(EXTRA_BODY).orEmpty().ifBlank { "New message" }
         val notificationFingerprint = notificationFingerprint(title, body)
         if (isDismissedNotification(this, notificationFingerprint)) {
@@ -860,7 +860,7 @@ class ChatHeadOverlayService : Service() {
     private fun iconButton(textValue: String, action: () -> Unit): ImageButton {
         return ImageButton(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            contentDescription = if (textValue == "X") "Close chat head" else "Open Happy"
+            contentDescription = if (textValue == "X") "Close chat head" else "Open AgenticMessenger"
             setImageDrawable(TextDrawable(textValue, ContextCompat.getColor(context, android.R.color.holo_blue_light)))
             setOnClickListener { action() }
         }
@@ -978,8 +978,8 @@ class ChatHeadOverlayService : Service() {
         )
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.notification_icon)
-            .setContentTitle("Happy chat head active")
-            .setContentText("Tap to open Happy")
+            .setContentTitle("AgenticMessenger chat head active")
+            .setContentText("Tap to open AgenticMessenger")
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setSilent(true)
@@ -1172,7 +1172,7 @@ class ChatHeadOverlayService : Service() {
             avatarUri: String?,
             notificationCount: Int = 0
         ) {
-            val resolvedTitle = title.orEmpty().ifBlank { "Happy" }
+            val resolvedTitle = title.orEmpty().ifBlank { "AgenticMessenger" }
             val resolvedBody = body.orEmpty().ifBlank { "New message" }
             if (isDismissedNotification(context, notificationFingerprint(resolvedTitle, resolvedBody))) {
                 return
