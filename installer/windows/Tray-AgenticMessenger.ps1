@@ -207,11 +207,16 @@ function Test-AgenticMessengerTray {
     $happy = Find-CommandPath @("happy.cmd", "happy")
     $codex = Find-CommandPath @("codex.cmd", "codex")
     $updater = Join-Path $InstallDir "Update-AgenticMessenger.cmd"
-    $trayVbs = Join-Path $InstallDir "Start-AgenticMessengerTray.vbs"
+    $trayScript = Join-Path $InstallDir "Tray-AgenticMessenger.ps1"
     $startupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Tray.lnk"
     $startupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Daemon.lnk"
     $legacyStartupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Tray.lnk"
     $legacyStartupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Daemon.lnk"
+    $startupShortcut = $null
+    if (Test-Path $startupTray) {
+        $shell = New-Object -ComObject WScript.Shell
+        $startupShortcut = $shell.CreateShortcut($startupTray)
+    }
 
     $checks = @(
         [pscustomobject]@{ Name = "Happy CLI"; Ok = [bool]$happy; Detail = $happy },
@@ -219,8 +224,9 @@ function Test-AgenticMessengerTray {
         [pscustomobject]@{ Name = "Agentic Messenger launcher"; Ok = (Test-Path $Launcher); Detail = $Launcher },
         [pscustomobject]@{ Name = "Daemon launcher"; Ok = (Test-Path $DaemonLauncher); Detail = $DaemonLauncher },
         [pscustomobject]@{ Name = "Updater launcher"; Ok = (Test-Path $updater); Detail = $updater },
-        [pscustomobject]@{ Name = "Hidden tray startup launcher"; Ok = (Test-Path $trayVbs); Detail = $trayVbs },
+        [pscustomobject]@{ Name = "Tray script"; Ok = (Test-Path $trayScript); Detail = $trayScript },
         [pscustomobject]@{ Name = "Tray startup shortcut"; Ok = (Test-Path $startupTray); Detail = $startupTray },
+        [pscustomobject]@{ Name = "Tray startup uses hidden PowerShell"; Ok = ($startupShortcut -and $startupShortcut.TargetPath -match "powershell.exe$" -and $startupShortcut.Arguments -match "WindowStyle Hidden" -and $startupShortcut.Arguments -match "Tray-AgenticMessenger\.ps1"); Detail = if ($startupShortcut) { "$($startupShortcut.TargetPath) $($startupShortcut.Arguments)" } else { "" } },
         [pscustomobject]@{ Name = "Daemon startup shortcut removed"; Ok = (-not (Test-Path $startupDaemon)); Detail = $startupDaemon },
         [pscustomobject]@{ Name = "Legacy Happy Codex tray startup removed"; Ok = (-not (Test-Path $legacyStartupTray)); Detail = $legacyStartupTray },
         [pscustomobject]@{ Name = "Legacy Happy Codex daemon startup removed"; Ok = (-not (Test-Path $legacyStartupDaemon)); Detail = $legacyStartupDaemon },

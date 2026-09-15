@@ -96,7 +96,8 @@ function Remove-LegacyInstallEntries {
         (Join-Path $LegacyInstallDir "Start-HappyCodexTray.vbs"),
         (Join-Path $LegacyInstallDir "Start-HappyDaemon.cmd"),
         (Join-Path $LegacyInstallDir "Tray-HappyCodex.ps1"),
-        (Join-Path $LegacyInstallDir "Update-HappyCodex.cmd")
+        (Join-Path $LegacyInstallDir "Update-HappyCodex.cmd"),
+        (Join-Path $InstallDir "Start-AgenticMessengerTray.vbs")
     )
 
     foreach ($path in $legacyPaths) {
@@ -359,13 +360,6 @@ call happy.cmd daemon start > "%LOCALAPPDATA%\AgenticMessenger\logs\daemon-start
 exit /b 0
 '@
 
-    $trayLauncherScript = @'
-Set shell = CreateObject("WScript.Shell")
-installDir = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\AgenticMessenger"
-command = "powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & installDir & "\Tray-AgenticMessenger.ps1"" -StartDaemon"
-shell.Run command, 0, False
-'@
-
     $trayTarget = Join-Path $InstallDir "Tray-AgenticMessenger.ps1"
     if ($BundledTrayScript) {
         Set-Content -Path $trayTarget -Value $BundledTrayScript -Encoding UTF8
@@ -424,7 +418,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%installer%"
 
     Set-Content -Path (Join-Path $InstallDir "Start-AgenticMessenger.cmd") -Value $startScript -Encoding ASCII
     Set-Content -Path (Join-Path $InstallDir "Start-AgenticMessengerDaemon.cmd") -Value $daemonScript -Encoding ASCII
-    Set-Content -Path (Join-Path $InstallDir "Start-AgenticMessengerTray.vbs") -Value $trayLauncherScript -Encoding ASCII
     Set-Content -Path (Join-Path $InstallDir "Update-AgenticMessenger.cmd") -Value $updateScript -Encoding ASCII
 }
 
@@ -466,15 +459,15 @@ function Install-Shortcuts {
     Write-Step "Creating shortcuts"
 
     $cmd = Join-Path $env:WINDIR "System32\cmd.exe"
-    $wscript = Join-Path $env:WINDIR "System32\wscript.exe"
+    $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
     $startArgs = "/k `"$InstallDir\Start-AgenticMessenger.cmd`""
     $updateArgs = "/k `"$InstallDir\Update-AgenticMessenger.cmd`""
-    $trayVbsArgs = "`"$InstallDir\Start-AgenticMessengerTray.vbs`""
+    $trayArgs = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstallDir\Tray-AgenticMessenger.ps1`" -StartDaemon"
 
     Remove-LegacyInstallEntries
 
     New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger.lnk") -TargetPath $cmd -Arguments $startArgs
-    New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
+    New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
     New-Shortcut -Path (Join-Path $StartMenuDir "Update and Login Agentic Messenger.lnk") -TargetPath $cmd -Arguments $updateArgs
     New-WebShortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Web.url")
 
@@ -483,7 +476,7 @@ function Install-Shortcuts {
 
     if (-not $NoStartup) {
         Remove-Item -LiteralPath (Join-Path $StartupDir "Agentic Messenger Daemon.lnk") -ErrorAction SilentlyContinue
-        New-Shortcut -Path (Join-Path $StartupDir "Agentic Messenger Tray.lnk") -TargetPath $wscript -Arguments $trayVbsArgs
+        New-Shortcut -Path (Join-Path $StartupDir "Agentic Messenger Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
     }
 }
 
