@@ -17,6 +17,7 @@ $AgenticMessengerWebUrl = "https://queued-tablet-2f9v.here.now/"
 $LegacyInstallDir = Join-Path $env:LOCALAPPDATA "HappyCodex"
 $InstallDir = Join-Path $env:LOCALAPPDATA $AppKey
 $LogDir = Join-Path $InstallDir "logs"
+$IconFileName = "AgenticMessengerIcon.ico"
 $StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Agentic Messenger"
 $LegacyStartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Happy Codex"
 $StartupDir = [Environment]::GetFolderPath("Startup")
@@ -101,7 +102,8 @@ function Remove-LegacyInstallEntries {
         (Join-Path $LegacyInstallDir "Start-HappyDaemon.cmd"),
         (Join-Path $LegacyInstallDir "Tray-HappyCodex.ps1"),
         (Join-Path $LegacyInstallDir "Update-HappyCodex.cmd"),
-        (Join-Path $InstallDir "Start-AgenticMessengerTray.vbs")
+        (Join-Path $InstallDir "Start-AgenticMessengerTray.vbs"),
+        (Join-Path $InstallDir "AgenticMessenger.ico")
     )
 
     foreach ($path in $legacyPaths) {
@@ -404,7 +406,7 @@ exit /b 0
     }
 
     if ($BundledIconBase64) {
-        [IO.File]::WriteAllBytes((Join-Path $InstallDir "AgenticMessenger.ico"), [Convert]::FromBase64String($BundledIconBase64))
+        [IO.File]::WriteAllBytes((Join-Path $InstallDir $IconFileName), [Convert]::FromBase64String($BundledIconBase64))
     }
 
     $installedExe = Join-Path $InstallDir "AgenticMessengerSetup.exe"
@@ -451,7 +453,7 @@ function New-Shortcut {
         [string]$Arguments = "",
         [string]$WorkingDirectory = $InstallDir,
         [string]$Description = $AppName,
-        [string]$IconLocation = (Join-Path $InstallDir "AgenticMessenger.ico")
+        [string]$IconLocation = (Join-Path $InstallDir $IconFileName)
     )
 
     $shell = New-Object -ComObject WScript.Shell
@@ -472,7 +474,7 @@ function New-WebShortcut {
     $content = @"
 [InternetShortcut]
 URL=$AgenticMessengerWebUrl
-IconFile=$InstallDir\AgenticMessenger.ico
+IconFile=$InstallDir\$IconFileName
 IconIndex=0
 "@
     Set-Content -Path $Path -Value $content -Encoding ASCII

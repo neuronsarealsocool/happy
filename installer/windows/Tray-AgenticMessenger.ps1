@@ -13,7 +13,8 @@ $InstallDir = Join-Path $env:LOCALAPPDATA $AppKey
 $LogDir = Join-Path $InstallDir "logs"
 $Launcher = Join-Path $InstallDir "Start-AgenticMessenger.cmd"
 $DaemonLauncher = Join-Path $InstallDir "Start-AgenticMessengerDaemon.cmd"
-$TrayIconPath = Join-Path $InstallDir "AgenticMessenger.ico"
+$TrayIconPath = Join-Path $InstallDir "AgenticMessengerIcon.ico"
+$LegacyTrayIconPath = Join-Path $InstallDir "AgenticMessenger.ico"
 $RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $RunValueName = "Agentic Messenger Tray"
 
@@ -233,7 +234,7 @@ function Test-AgenticMessengerTray {
         [pscustomobject]@{ Name = "Daemon startup shortcut removed"; Ok = (-not (Test-Path $startupDaemon)); Detail = $startupDaemon },
         [pscustomobject]@{ Name = "Legacy Happy Codex tray startup removed"; Ok = (-not (Test-Path $legacyStartupTray)); Detail = $legacyStartupTray },
         [pscustomobject]@{ Name = "Legacy Happy Codex daemon startup removed"; Ok = (-not (Test-Path $legacyStartupDaemon)); Detail = $legacyStartupDaemon },
-        [pscustomobject]@{ Name = "Tray icon"; Ok = (Test-Path $TrayIconPath); Detail = $TrayIconPath },
+        [pscustomobject]@{ Name = "Tray icon"; Ok = ((Test-Path $TrayIconPath) -or (Test-Path $LegacyTrayIconPath)); Detail = $TrayIconPath },
         [pscustomobject]@{ Name = "Agentic Messenger web URL"; Ok = ($AgenticMessengerWebUrl -eq "https://queued-tablet-2f9v.here.now/"); Detail = $AgenticMessengerWebUrl }
     )
 
@@ -299,8 +300,13 @@ if (-not $createdNew) {
 
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $notifyIcon.Text = $AppName
-if (Test-Path $TrayIconPath) {
-    $notifyIcon.Icon = New-Object System.Drawing.Icon($TrayIconPath)
+$activeIconPath = $TrayIconPath
+if (-not (Test-Path $activeIconPath)) {
+    $activeIconPath = $LegacyTrayIconPath
+}
+
+if (Test-Path $activeIconPath) {
+    $notifyIcon.Icon = New-Object System.Drawing.Icon($activeIconPath)
 }
 else {
     $notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
