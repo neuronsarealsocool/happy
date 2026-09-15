@@ -463,7 +463,7 @@ function New-Shortcut {
     $shortcut.WorkingDirectory = $WorkingDirectory
     $shortcut.Description = $Description
     if ($IconLocation -and (Test-Path $IconLocation)) {
-        $shortcut.IconLocation = $IconLocation
+        $shortcut.IconLocation = "$IconLocation,0"
     }
     $shortcut.Save()
 }
