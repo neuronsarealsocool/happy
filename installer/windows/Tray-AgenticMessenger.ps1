@@ -14,6 +14,8 @@ $LogDir = Join-Path $InstallDir "logs"
 $Launcher = Join-Path $InstallDir "Start-AgenticMessenger.cmd"
 $DaemonLauncher = Join-Path $InstallDir "Start-AgenticMessengerDaemon.cmd"
 $TrayIconPath = Join-Path $InstallDir "AgenticMessenger.ico"
+$RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$RunValueName = "Agentic Messenger Tray"
 
 New-Item -ItemType Directory -Force -Path $InstallDir, $LogDir | Out-Null
 
@@ -209,13 +211,13 @@ function Test-AgenticMessengerTray {
     $updater = Join-Path $InstallDir "Update-AgenticMessenger.cmd"
     $trayScript = Join-Path $InstallDir "Tray-AgenticMessenger.ps1"
     $startupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Tray.lnk"
+    $desktopTray = Join-Path ([Environment]::GetFolderPath("DesktopDirectory")) "Agentic Messenger Tray.lnk"
     $startupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Daemon.lnk"
     $legacyStartupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Tray.lnk"
     $legacyStartupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Happy Codex Daemon.lnk"
-    $startupShortcut = $null
-    if (Test-Path $startupTray) {
-        $shell = New-Object -ComObject WScript.Shell
-        $startupShortcut = $shell.CreateShortcut($startupTray)
+    $runValue = $null
+    if (Test-Path $RunKeyPath) {
+        $runValue = (Get-ItemProperty -Path $RunKeyPath -Name $RunValueName -ErrorAction SilentlyContinue).$RunValueName
     }
 
     $checks = @(
@@ -225,8 +227,9 @@ function Test-AgenticMessengerTray {
         [pscustomobject]@{ Name = "Daemon launcher"; Ok = (Test-Path $DaemonLauncher); Detail = $DaemonLauncher },
         [pscustomobject]@{ Name = "Updater launcher"; Ok = (Test-Path $updater); Detail = $updater },
         [pscustomobject]@{ Name = "Tray script"; Ok = (Test-Path $trayScript); Detail = $trayScript },
-        [pscustomobject]@{ Name = "Tray startup shortcut"; Ok = (Test-Path $startupTray); Detail = $startupTray },
-        [pscustomobject]@{ Name = "Tray startup uses hidden PowerShell"; Ok = ($startupShortcut -and $startupShortcut.TargetPath -match "powershell.exe$" -and $startupShortcut.Arguments -match "WindowStyle Hidden" -and $startupShortcut.Arguments -match "Tray-AgenticMessenger\.ps1"); Detail = if ($startupShortcut) { "$($startupShortcut.TargetPath) $($startupShortcut.Arguments)" } else { "" } },
+        [pscustomobject]@{ Name = "Desktop tray shortcut"; Ok = (Test-Path $desktopTray); Detail = $desktopTray },
+        [pscustomobject]@{ Name = "Startup folder tray shortcut removed"; Ok = (-not (Test-Path $startupTray)); Detail = $startupTray },
+        [pscustomobject]@{ Name = "Tray Run key startup"; Ok = ($runValue -and $runValue -match "powershell.exe" -and $runValue -match "WindowStyle Hidden" -and $runValue -match "Tray-AgenticMessenger\.ps1"); Detail = $runValue },
         [pscustomobject]@{ Name = "Daemon startup shortcut removed"; Ok = (-not (Test-Path $startupDaemon)); Detail = $startupDaemon },
         [pscustomobject]@{ Name = "Legacy Happy Codex tray startup removed"; Ok = (-not (Test-Path $legacyStartupTray)); Detail = $legacyStartupTray },
         [pscustomobject]@{ Name = "Legacy Happy Codex daemon startup removed"; Ok = (-not (Test-Path $legacyStartupDaemon)); Detail = $legacyStartupDaemon },
@@ -284,6 +287,15 @@ if ($Action) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+
+$createdNew = $false
+$script:TrayMutex = New-Object System.Threading.Mutex($true, "AgenticMessengerTray", [ref]$createdNew)
+if (-not $createdNew) {
+    if ($StartDaemon -and -not (Test-HappyDaemonRunning)) {
+        Start-AgenticMessengerDaemon | Out-Null
+    }
+    exit 0
+}
 
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $notifyIcon.Text = $AppName
@@ -347,6 +359,10 @@ Add-MenuItem "Open Logs" { Open-Logs }
 Add-MenuItem "Exit Tray" {
     $notifyIcon.Visible = $false
     $notifyIcon.Dispose()
+    if ($script:TrayMutex) {
+        $script:TrayMutex.ReleaseMutex()
+        $script:TrayMutex.Dispose()
+    }
     [System.Windows.Forms.Application]::Exit()
 }
 

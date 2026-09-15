@@ -21,6 +21,8 @@ $StartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Ag
 $LegacyStartMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Happy Codex"
 $StartupDir = [Environment]::GetFolderPath("Startup")
 $DesktopDir = [Environment]::GetFolderPath("DesktopDirectory")
+$RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$RunValueName = "Agentic Messenger Tray"
 $TranscriptPath = Join-Path $LogDir ("install-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 $CommandPath = [Environment]::GetCommandLineArgs()[0]
 $RawArgs = [Environment]::GetCommandLineArgs() | Select-Object -Skip 1
@@ -91,6 +93,8 @@ function Remove-LegacyInstallEntries {
         (Join-Path $DesktopDir "Happy Web.url"),
         (Join-Path $StartupDir "Happy Codex Tray.lnk"),
         (Join-Path $StartupDir "Happy Codex Daemon.lnk"),
+        (Join-Path $StartupDir "Agentic Messenger Tray.lnk"),
+        (Join-Path $StartupDir "Agentic Messenger Daemon.lnk"),
         (Join-Path $LegacyInstallDir "HappyCodexSetup.exe"),
         (Join-Path $LegacyInstallDir "Start-HappyCodex.cmd"),
         (Join-Path $LegacyInstallDir "Start-HappyCodexTray.vbs"),
@@ -108,11 +112,30 @@ function Remove-LegacyInstallEntries {
         Remove-Item -LiteralPath $LegacyStartMenuDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
+    if (Test-Path $RunKeyPath) {
+        foreach ($valueName in @("Happy Codex Tray", "Happy Codex Daemon", "Agentic Messenger Daemon")) {
+            Remove-ItemProperty -Path $RunKeyPath -Name $valueName -ErrorAction SilentlyContinue
+        }
+    }
+
     if (Test-Path $LegacyInstallDir) {
         $remaining = Get-ChildItem -LiteralPath $LegacyInstallDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $remaining) {
             Remove-Item -LiteralPath $LegacyInstallDir -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+function Set-AgenticMessengerStartupRunKey {
+    param([string]$Command)
+
+    New-Item -Path $RunKeyPath -Force | Out-Null
+    Set-ItemProperty -Path $RunKeyPath -Name $RunValueName -Value $Command
+}
+
+function Remove-AgenticMessengerStartupRunKey {
+    if (Test-Path $RunKeyPath) {
+        Remove-ItemProperty -Path $RunKeyPath -Name $RunValueName -ErrorAction SilentlyContinue
     }
 }
 
@@ -463,6 +486,7 @@ function Install-Shortcuts {
     $startArgs = "/k `"$InstallDir\Start-AgenticMessenger.cmd`""
     $updateArgs = "/k `"$InstallDir\Update-AgenticMessenger.cmd`""
     $trayArgs = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstallDir\Tray-AgenticMessenger.ps1`" -StartDaemon"
+    $trayCommand = "$powershell $trayArgs"
 
     Remove-LegacyInstallEntries
 
@@ -472,11 +496,14 @@ function Install-Shortcuts {
     New-WebShortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Web.url")
 
     New-Shortcut -Path (Join-Path $DesktopDir "Agentic Messenger.lnk") -TargetPath $cmd -Arguments $startArgs
+    New-Shortcut -Path (Join-Path $DesktopDir "Agentic Messenger Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
     New-WebShortcut -Path (Join-Path $DesktopDir "Agentic Messenger Web.url")
 
     if (-not $NoStartup) {
-        Remove-Item -LiteralPath (Join-Path $StartupDir "Agentic Messenger Daemon.lnk") -ErrorAction SilentlyContinue
-        New-Shortcut -Path (Join-Path $StartupDir "Agentic Messenger Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
+        Set-AgenticMessengerStartupRunKey $trayCommand
+    }
+    else {
+        Remove-AgenticMessengerStartupRunKey
     }
 }
 
