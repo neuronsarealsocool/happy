@@ -268,7 +268,7 @@ export default React.memo(() => {
             await loadPushSettings();
 
             if (result.openedSettings) {
-                Modal.alert('Open Settings', 'The system will not show the permission prompt again, so AgenticMessenger opened Settings instead.');
+                Modal.alert('Open Settings', 'The system will not show the permission prompt again, so Agentic Messenger opened Settings instead.');
                 return;
             }
 
@@ -345,7 +345,7 @@ export default React.memo(() => {
         const allowed = await canUseAndroidChatHeads();
         setChatHeadsAllowed(allowed);
         if (!allowed) {
-            Modal.alert('Enable Chat Heads', 'Android needs “Display over other apps” permission before AgenticMessenger can show chat heads.');
+            Modal.alert('Enable Chat Heads', 'Android needs “Display over other apps” permission before Agentic Messenger can show chat heads.');
             openAndroidChatHeadSettings();
             return;
         }
@@ -587,14 +587,14 @@ export default React.memo(() => {
                 {Platform.OS === 'android' && (
                     <ItemGroup
                         title="Chat Heads"
-                        footer="Chat heads appear over other apps when AgenticMessenger receives a notification. Android controls this with the special “Display over other apps” permission."
+                        footer="Chat heads appear over other apps when Agentic Messenger receives a notification. Android controls this with the special “Display over other apps” permission."
                     >
                         <Item
                             title="Display Over Other Apps"
                             detail={chatHeadsAllowed === null ? 'Checking' : chatHeadsAllowed ? 'Allowed' : 'Needs permission'}
                             subtitle={chatHeadsAllowed
-                                ? 'AgenticMessenger can show Messenger-style chat heads.'
-                                : 'Open Android settings and allow AgenticMessenger to display over other apps.'}
+                                ? 'Agentic Messenger can show Messenger-style chat heads.'
+                                : 'Open Android settings and allow Agentic Messenger to display over other apps.'}
                             icon={<Ionicons name="chatbubble-ellipses-outline" size={29} color="#007AFF" />}
                             onPress={handleOpenChatHeadSettings}
                             showChevron={false}
@@ -603,8 +603,8 @@ export default React.memo(() => {
                             title="Notification Access"
                             detail={notificationAccessAllowed === null ? 'Checking' : notificationAccessAllowed ? 'Allowed' : 'Needs permission'}
                             subtitle={notificationAccessAllowed
-                                ? 'AgenticMessenger can show chat heads from posted notifications.'
-                                : 'Allow AgenticMessenger notification access so normal push notifications can become chat heads.'}
+                                ? 'Agentic Messenger can show chat heads from posted notifications.'
+                                : 'Allow Agentic Messenger notification access so normal push notifications can become chat heads.'}
                             icon={<Ionicons name="notifications-circle-outline" size={29} color="#5856D6" />}
                             onPress={handleOpenNotificationAccessSettings}
                             showChevron={false}

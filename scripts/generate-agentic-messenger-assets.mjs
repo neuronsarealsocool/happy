@@ -9,10 +9,9 @@ const outputDir = path.join(brandDir, 'generated');
 
 await mkdir(outputDir, { recursive: true });
 
-const mark = await readFile(path.join(brandDir, 'agentic-messenger-mark.svg'));
-const foreground = await readFile(path.join(brandDir, 'agentic-messenger-foreground.svg'));
+const mark = await readFile(path.join(brandDir, 'agentic-messenger-icon.png'));
+const foreground = mark;
 const monochrome = await readFile(path.join(brandDir, 'agentic-messenger-monochrome.svg'));
-const wordmark = await readFile(path.join(brandDir, 'agentic-messenger-wordmark.svg'));
 
 const png = async (source, filename, width, options = {}) => {
   const height = options.height ?? width;
@@ -33,12 +32,20 @@ await Promise.all([
   png(monochrome, 'android-notification-512.png', 512),
 ]);
 
-const lightWordmark = Buffer.from(wordmark.toString().replace('fill="#102A52"', 'fill="#FFFFFF"'));
+const makeWordmark = (textColor) => Buffer.from(`
+  <svg width="2500" height="520" xmlns="http://www.w3.org/2000/svg">
+    <image href="data:image/png;base64,${mark.toString('base64')}" x="18" y="40" width="440" height="440"/>
+    <text x="485" y="322" fill="${textColor}" font-family="Arial, Helvetica, sans-serif" font-size="165" font-weight="700" letter-spacing="0">Agentic Messenger</text>
+  </svg>
+`);
+
+const darkWordmark = makeWordmark('#102A52');
+const lightWordmark = makeWordmark('#FFFFFF');
 
 await Promise.all([
-  png(wordmark, 'wordmark-dark.png', 1965, { height: 523 }),
-  png(wordmark, 'wordmark-dark@2x.png', 3930, { height: 1046 }),
-  png(wordmark, 'wordmark-dark@3x.png', 5895, { height: 1569 }),
+  png(darkWordmark, 'wordmark-dark.png', 1965, { height: 523 }),
+  png(darkWordmark, 'wordmark-dark@2x.png', 3930, { height: 1046 }),
+  png(darkWordmark, 'wordmark-dark@3x.png', 5895, { height: 1569 }),
   png(lightWordmark, 'wordmark-light.png', 1965, { height: 523 }),
   png(lightWordmark, 'wordmark-light@2x.png', 3930, { height: 1046 }),
   png(lightWordmark, 'wordmark-light@3x.png', 5895, { height: 1569 }),
@@ -67,8 +74,8 @@ await Promise.all([
   copyFile(generated('android-notification-512.png'), path.join(imageDir, 'icon-notification.png')),
   copyFile(generated('app-icon-1024.png'), path.join(imageDir, 'favicon.png')),
   copyFile(generated('favicon-active-1024.png'), path.join(imageDir, 'favicon-active.png')),
-  copyFile(generated('android-monochrome-1024.png'), path.join(imageDir, 'logo-black.png')),
-  copyFile(generated('android-monochrome-1024.png'), path.join(imageDir, 'logo-white.png')),
+  copyFile(generated('app-icon-1024.png'), path.join(imageDir, 'logo-black.png')),
+  copyFile(generated('app-icon-1024.png'), path.join(imageDir, 'logo-white.png')),
   copyFile(generated('wordmark-dark.png'), path.join(imageDir, 'logotype.png')),
   copyFile(generated('wordmark-dark.png'), path.join(imageDir, 'logotype-dark.png')),
   copyFile(generated('wordmark-dark@2x.png'), path.join(imageDir, 'logotype-dark@2x.png')),
@@ -108,4 +115,4 @@ for (const [density, sizes] of Object.entries(densities)) {
   ]);
 }
 
-console.log(`Generated and applied AgenticMessenger assets from ${outputDir}`);
+console.log(`Generated and applied Agentic Messenger assets from ${outputDir}`);

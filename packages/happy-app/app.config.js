@@ -2,9 +2,9 @@ const { execFileSync } = require('node:child_process');
 
 const variant = process.env.APP_ENV || 'development';
 const name = {
-    development: "AgenticMessenger (dev)",
-    preview: "AgenticMessenger (preview)",
-    production: "AgenticMessenger"
+    development: "Agentic Messenger (dev)",
+    preview: "Agentic Messenger (preview)",
+    production: "Agentic Messenger"
 }[variant];
 const bundleId = {
     development: "com.slopus.happy.dev",
@@ -59,7 +59,7 @@ export default {
     expo: {
         name,
         slug: "happy",
-        version: "1.7.0",
+        version: "2.0.2",
         runtimeVersion: "21",
         orientation: "default",
         icon: "./sources/assets/images/icon.png",
@@ -92,6 +92,7 @@ export default {
                 : {})
         },
         android: {
+            versionCode: 20260916,
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
                 monochromeImage: "./sources/assets/images/icon-monochrome.png",

@@ -75,7 +75,7 @@ export function showAndroidChatHeadPreview() {
         return;
     }
     nativeModule.showTestChatHead(
-        'AgenticMessenger',
+        'Agentic Messenger',
         'Chat heads are ready. New notifications can pop over other apps.',
         '',
         ''

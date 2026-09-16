@@ -1,11 +1,9 @@
-# AgenticMessenger Brand Assets
+# Agentic Messenger Brand Assets
 
-The SVG files are the editable source of truth for the selected AgenticMessenger option A.
+The supplied PNG is the full-color source of truth for Agentic Messenger.
 
-- `agentic-messenger-mark.svg`: full-color master mark
-- `agentic-messenger-foreground.svg`: Android adaptive foreground
+- `agentic-messenger-icon.png`: full-color app icon, logo, splash, and adaptive foreground source
 - `agentic-messenger-monochrome.svg`: Android themed/notification source
-- `agentic-messenger-wordmark.svg`: horizontal wordmark
 - `generated/`: raster exports created by the generator
 
 The generated pack includes 1024px app/adaptive masters, Android monochrome and

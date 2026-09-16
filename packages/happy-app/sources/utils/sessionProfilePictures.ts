@@ -88,7 +88,7 @@ export async function pickAndSaveSessionProfilePicture(sessionId: string): Promi
         });
 
         if (!resized.base64) {
-            Modal.alert('Unable to save picture', 'AgenticMessenger could not read that image. Please try another file.');
+            Modal.alert('Unable to save picture', 'Agentic Messenger could not read that image. Please try another file.');
             return false;
         }
 

@@ -13,7 +13,7 @@ class HappyFirebaseMessagingService : ExpoFirebaseMessagingService() {
             ?: data["title"]
             ?: data["sessionTitle"]
             ?: data["conversationTitle"]
-            ?: "AgenticMessenger"
+            ?: "Agentic Messenger"
         val body = notification?.body
             ?: data["body"]
             ?: data["message"]

@@ -469,7 +469,7 @@ class Sync {
             await Notifications.scheduleNotificationAsync({
                 content: {
                     title: 'Message failed',
-                    body: 'A message failed to send while the app was in background. Open AgenticMessenger and retry.',
+                    body: 'A message failed to send while the app was in background. Open Agentic Messenger and retry.',
                     sound: true
                 },
                 trigger: null
