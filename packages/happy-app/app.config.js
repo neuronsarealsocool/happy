@@ -96,7 +96,7 @@ export default {
             adaptiveIcon: {
                 foregroundImage: "./sources/assets/images/icon-adaptive.png",
                 monochromeImage: "./sources/assets/images/icon-monochrome.png",
-                backgroundColor: "#F4F7FB"
+                backgroundColor: "#FFFFFF"
             },
             permissions: [
                 "android.permission.RECORD_AUDIO",

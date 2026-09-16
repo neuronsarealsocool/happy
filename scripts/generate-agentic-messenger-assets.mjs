@@ -9,9 +9,32 @@ const outputDir = path.join(brandDir, 'generated');
 
 await mkdir(outputDir, { recursive: true });
 
+const paddedSquare = async (source, size, scale) => {
+  const insetSize = Math.round(size * scale);
+  const inset = await sharp(source, { density: 384 })
+    .resize(insetSize, insetSize, { fit: 'contain' })
+    .png()
+    .toBuffer();
+
+  return sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([{ input: inset, gravity: 'center' }])
+    .png()
+    .toBuffer();
+};
+
 const mark = await readFile(path.join(brandDir, 'agentic-messenger-icon.png'));
-const foreground = mark;
 const monochrome = await readFile(path.join(brandDir, 'agentic-messenger-monochrome.svg'));
+// Android zooms adaptive foregrounds beyond the final launcher mask. Keeping the
+// artwork inside this inset gives the blue mark Messenger-like white breathing room.
+const foreground = await paddedSquare(mark, 1024, 0.72);
+const monochromeForeground = await paddedSquare(monochrome, 1024, 0.72);
 
 const png = async (source, filename, width, options = {}) => {
   const height = options.height ?? width;
@@ -28,7 +51,7 @@ await Promise.all([
   png(mark, 'favicon-48.png', 48),
   png(mark, 'favicon-32.png', 32),
   png(foreground, 'android-adaptive-foreground-1024.png', 1024),
-  png(monochrome, 'android-monochrome-1024.png', 1024),
+  png(monochromeForeground, 'android-monochrome-1024.png', 1024),
   png(monochrome, 'android-notification-512.png', 512),
 ]);
 
@@ -108,7 +131,7 @@ for (const [density, sizes] of Object.entries(densities)) {
     sharp(mark, { density: 384 }).resize(sizes.launcher, sizes.launcher).webp({ lossless: true }).toFile(path.join(mipmap, 'ic_launcher.webp')),
     sharp(mark, { density: 384 }).resize(sizes.launcher, sizes.launcher).webp({ lossless: true }).toFile(path.join(mipmap, 'ic_launcher_round.webp')),
     sharp(foreground, { density: 384 }).resize(sizes.foreground, sizes.foreground).webp({ lossless: true }).toFile(path.join(mipmap, 'ic_launcher_foreground.webp')),
-    sharp(monochrome, { density: 384 }).resize(sizes.foreground, sizes.foreground).webp({ lossless: true }).toFile(path.join(mipmap, 'ic_launcher_monochrome.webp')),
+    sharp(monochromeForeground, { density: 384 }).resize(sizes.foreground, sizes.foreground).webp({ lossless: true }).toFile(path.join(mipmap, 'ic_launcher_monochrome.webp')),
     sharp(monochrome, { density: 384 }).resize(sizes.notification, sizes.notification).png({ compressionLevel: 9 }).toFile(path.join(drawable, 'notification_icon.png')),
     sharp(mark, { density: 384 }).resize(sizes.splash, sizes.splash).png({ compressionLevel: 9 }).toFile(path.join(drawable, 'splashscreen_logo.png')),
     sharp(mark, { density: 384 }).resize(sizes.splash, sizes.splash).png({ compressionLevel: 9 }).toFile(path.join(drawableNight, 'splashscreen_logo.png')),
