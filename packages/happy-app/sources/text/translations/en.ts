@@ -30,10 +30,17 @@ function plural({ count, singular, plural }: { count: number; singular: string; 
  * - New translation keys must be added to ALL language files
  */
 export const en: TranslationStructure = {
+    voiceStatusBar: {
+        tapToEnd: 'tap to end',
+        connecting: 'Connecting…',
+        error: 'Connection error',
+        active: 'Voice assistant active',
+    },
+
     tabs: {
         // Tab navigation labels
         inbox: 'Inbox',
-        sessions: 'Terminals',
+        sessions: 'Sessions',
         settings: 'Settings',
     },
 
@@ -73,6 +80,7 @@ export const en: TranslationStructure = {
         fileViewer: 'File Viewer',
         loading: 'Loading...',
         retry: 'Retry',
+        loadMore: 'Load more',
         delete: 'Delete',
         optional: 'optional',
     },
@@ -96,6 +104,7 @@ export const en: TranslationStructure = {
         offline: 'offline',
         lastSeen: ({ time }: { time: string }) => `last seen ${time}`,
         permissionRequired: 'permission required',
+        inputRequired: 'waiting for your answer',
         activeNow: 'Active now',
         unknown: 'unknown',
         unread: 'new results',
@@ -177,13 +186,6 @@ export const en: TranslationStructure = {
         },
         chat: 'Chat',
         chatDescription: 'Customize chat message appearance',
-        sessionStatusBar: 'Session Status Info',
-        sessionStatusBarDescription: 'Choose where branch, model, effort, and context appear',
-        sessionStatusDisplayOptions: {
-            hidden: 'Hidden',
-            above: 'Above composer',
-            below: 'Below composer',
-        },
         usageLimitShowRemaining: 'Show Quota Remaining',
         usageLimitShowRemainingDescription: 'Count plan limits down from full instead of up from empty',
         userMessageBubbleColor: 'User Bubble Color',
@@ -200,38 +202,41 @@ export const en: TranslationStructure = {
         displayDescription: 'Control layout and spacing',
         compactToolCalls: 'Compact Tool Calls',
         compactToolCallsDescription: 'Show non-interactive tool calls as one-line rows; open a row for details',
-        inlineToolCalls: 'Inline Tool Calls',
-        inlineToolCallsDescription: 'Display tool calls directly in chat messages',
-        expandTodoLists: 'Expand Todo Lists',
-        expandTodoListsDescription: 'Show all todos instead of just changes',
-        showLineNumbersInDiffs: 'Show Line Numbers in Diffs',
-        showLineNumbersInDiffsDescription: 'Display line numbers in code diffs',
         showLineNumbersInToolViews: 'Show Line Numbers in Tool Views',
         showLineNumbersInToolViewsDescription: 'Display line numbers in tool view diffs',
-        wrapLinesInDiffs: 'Wrap Lines in Diffs',
-        wrapLinesInDiffsDescription: 'Wrap long lines instead of horizontal scrolling in diff views',
-        diffStyle: 'Diff View',
-        diffStyleDescription: 'Show diffs as a single column (unified) or side-by-side (split). Split view is web-only.',
-        diffStyleOptions: {
-            unified: 'Unified',
-            split: 'Split',
-        },
-        alwaysShowContextSize: 'Always Show Context Size',
-        alwaysShowContextSizeDescription: 'Display context usage even when not near limit',
+        alwaysShowContextSize: 'Show Usage Status',
+        alwaysShowContextSizeDescription: 'Context and plan usage below the input. Near-limit warnings always show.',
+        input: 'Input',
+        inputDescription: 'Configure the message input',
+        showHarnessIconInSessionHeader: 'Show Harness Icon in Session Header',
+        showHarnessIconInSessionHeaderDescription: 'Display the harness icon in the session header',
+        showHarnessIconsInSessionList: 'Show Harness Icons in Session List',
+        showHarnessIconsInSessionListDescription: 'Display harness icons on session-list avatars',
+        avatars: 'Avatars',
+        avatarsDescription: 'Choose how generated session avatars look',
         avatarStyle: 'Avatar Style',
-        avatarStyleDescription: 'Choose session avatar appearance',
-        avatarOptions: {
+        avatarStyleOptions: {
+            brutalist: 'Brutalist',
             pixelated: 'Pixelated',
             gradient: 'Gradient',
-            brutalist: 'Brutalist',
         },
-        showFlavorIcons: 'Show AI Provider Icons',
-        showFlavorIconsDescription: 'Display AI provider icons on session avatars',
+        avatarMonochrome: 'Black & White Avatars',
+        avatarMonochromeDescription: 'Render avatars without color',
+    },
+
+    sessionsFilter: {
+        // Filter menu on the home sessions list header
+        title: 'Filter',
+        groupingTitle: 'Grouping',
+        flatList: 'Flat List',
+        groupByProject: 'Group by Project',
+        appearanceSettings: 'Appearance Settings',
+        worktreeTabs: ({ count }: { count: number }) => count === 1 ? '1 tab' : `${count} tabs`,
     },
 
     settingsFeatures: {
         // Features settings screen
-        experiments: 'Experiments',
+        experiments: 'Experimental',
         experimentsDescription: 'Enable experimental features that are still in development. These features may be unstable or change without notice.',
         experimentalFeatures: 'Experimental Features',
         experimentalFeaturesEnabled: 'Experimental features enabled',
@@ -246,17 +251,8 @@ export const en: TranslationStructure = {
         commandPaletteDisabled: 'Quick command access disabled',
         markdownCopyV2: 'Markdown Copy v2',
         markdownCopyV2Subtitle: 'Long press opens copy modal',
-        hideInactiveSessions: 'Hide inactive sessions',
-        hideInactiveSessionsSubtitle: 'Show only active chats in your list',
         groupToolCalls: 'Group Tool Calls',
         groupToolCallsSubtitle: 'Collapse consecutive tool calls into one container',
-        privacy: 'Privacy',
-        privacyDescription: 'Completely disables all analytics and telemetry. No data will be sent to PostHog or any other tracking service.',
-        disableAnalytics: 'Disable Analytics',
-        analyticsDisabled: 'All tracking and telemetry disabled',
-        analyticsEnabled: 'Anonymous usage analytics active',
-        imageUpload: 'Image Upload',
-        imageUploadSubtitle: 'Attach images to messages for supported agents to analyze',
     },
 
     errors: {
@@ -349,6 +345,9 @@ export const en: TranslationStructure = {
         forkErrorMissingMetadata: 'Missing session metadata required to fork.',
         forkErrorGeneric: 'Failed to fork the session.',
         forkClaudeOnly: 'Fork is currently only supported for Claude sessions.',
+        archiveAction: 'Archive',
+        startingChat: 'Starting a new chat…',
+        actionsTitle: 'Session',
     },
 
     commandPalette: {
@@ -358,6 +357,9 @@ export const en: TranslationStructure = {
     server: {
         // Used by Server Configuration screen (app/(app)/server.tsx)
         serverConfiguration: 'Server Configuration',
+        title: 'Server',
+        serverUrlLabel: 'Server URL',
+        selfHostFooter: 'For self-hosted servers. Sign out and back in after changing it.',
         enterServerUrl: 'Please enter a server URL',
         notValidHappyServer: 'Not a valid Agentic Messenger Server',
         changeServer: 'Change Server',
@@ -370,7 +372,12 @@ export const en: TranslationStructure = {
         failedToConnectToServer: 'Failed to connect to server',
         currentlyUsingCustomServer: 'Currently using custom server',
         customServerUrlLabel: 'Custom Server URL',
-        advancedFeatureFooter: "This is an advanced feature. Only change the server if you know what you're doing. You will need to log out and log in again after changing servers."
+        advancedFeatureFooter: "This is an advanced feature. Only change the server if you know what you're doing. You will need to log out and log in again after changing servers.",
+        services: 'Services',
+        useCustomServerForVoice: 'Use Custom Server for Voice',
+        customServerVoiceEnabled: 'Voice credentials and usage use your custom server',
+        customServerVoiceDisabled: 'Voice uses Happy Cloud and your Happy subscription',
+        customServerVoiceFooter: 'When off, starting voice contacts Happy Cloud and ElevenLabs. Turn this on only if your custom server is configured for voice.',
     },
 
     sessionInfo: {
@@ -400,11 +407,12 @@ export const en: TranslationStructure = {
         quickActions: 'Quick Actions',
         viewMachine: 'View Machine',
         viewMachineSubtitle: 'View machine details and sessions',
+        viewChanges: 'View changes',
+        viewChangesSubtitle: 'Diffs for every uncommitted file',
         resumeSession: 'Resume Session',
         resumeSessionSubtitle: 'Resume this session on the same machine',
         resumeSessionSameMachineOnly: 'This session can only be resumed on the same machine it started on.',
         resumeSessionMachineOffline: 'This machine is offline. Resume is only available while it is online.',
-        resumeSessionNeedsHappyAgent: 'Resume is unavailable on this machine. Run `happy-agent auth login` to enable it.',
         resumeSessionMissingMachine: 'This session is missing its machine metadata, so it cannot be resumed.',
         resumeSessionMissingBackendId: 'This session does not have a resumable Claude or Codex identifier.',
         resumeSessionUnexpectedDirectoryPrompt: 'Resume cannot create directories. Start the session manually from its original path.',
@@ -444,6 +452,11 @@ export const en: TranslationStructure = {
     components: {
         emptyMainScreen: {
             // Used by EmptyMainScreen component
+            connectComputer: 'Connect your computer',
+            desktopSetupInstructions: 'Install Happy Desktop from happy.engineering. In desktop setup, choose “I have the app open,” then scan the device-linking QR code here.',
+            harnessDescription: 'Use Claude Code or Codex, or try Happy Harness. Your account stays linked across your computer and phone.',
+            getDesktop: 'Get Happy Desktop',
+            terminalAlternative: 'Prefer the terminal? Set up Happy CLI',
             readyToCode: 'Ready to code?',
             installCli: 'Install the Agentic Messenger CLI',
             runIt: 'Run it',
@@ -457,24 +470,19 @@ export const en: TranslationStructure = {
             stopGoal: 'Stop goal',
             editGoal: 'Edit goal',
         },
-        sessionStatusBar: {
-            contextUsage: ({ used, total, percent }: { used: string; total: string; percent: number }) => `Context ${used} of ${total} tokens, ${percent}%`,
-            limitFiveHour: '5-hour limit',
-            limitSevenDay: '7-day limit',
-            limitResets: ({ time }: { time: string }) => `resets ${time}`,
-            limitAsOf: ({ age }: { age: string }) => `as of ${age} ago`,
-            limitRemaining: ({ percent }: { percent: number }) => `${percent}% left`,
-        },
     },
 
     agentInput: {
         permissionMode: {
             title: 'PERMISSION MODE',
-            default: 'default permissions',
-            acceptEdits: 'accept edits',
-            plan: 'plan',
+            auto: 'asks when unsure',
+            default: 'harness setting',
+            agyDefault: 'agy sandbox',
+            openclawInert: 'not applied',
+            acceptEdits: 'edits, no asking',
+            plan: 'plan first',
             dontAsk: "don't ask",
-            bypassPermissions: 'yolo',
+            bypassPermissions: 'never asks',
             badgeAcceptAllEdits: 'accept all edits',
             badgeBypassAllPermissions: 'yolo',
             badgePlanMode: 'plan mode',
@@ -498,10 +506,11 @@ export const en: TranslationStructure = {
             readOnly: 'read-only',
             safeYolo: 'safe yolo',
             yolo: 'yolo',
-            defaultDescription: 'ask before untrusted commands',
+            defaultDescription: 'codex setting',
+            autoDescription: 'asks when unsure',
             readOnlyDescription: 'no writes',
-            safeYoloDescription: 'no prompts, workspace sandbox',
-            yoloDescription: 'no prompts, full access',
+            safeYoloDescription: 'sandboxed, can escalate',
+            yoloDescription: 'full access',
             badgeReadOnly: 'read-only',
             badgeSafeYolo: 'safe yolo',
             badgeYolo: 'yolo',
@@ -527,7 +536,14 @@ export const en: TranslationStructure = {
             badgePlan: 'plan',
         },
         context: {
-            remaining: ({ percent }: { percent: number }) => `${percent}% left`,
+            detailContext: ({ used, total }: { used: string; total: string }) => `${used} / ${total} context`,
+            percentContext: ({ percent }: { percent: number }) => `${percent}% context`,
+            percentWeek: ({ percent }: { percent: number }) => `${percent}% week`,
+        },
+        usagePopup: {
+            session: 'Session',
+            week: 'Week',
+            resets: ({ time }: { time: string }) => `Resets ${time}`,
         },
         suggestion: {
             fileLabel: 'FILE',
@@ -563,6 +579,9 @@ export const en: TranslationStructure = {
         hideArchived: 'Hide archived',
         newSession: 'New session',
         projects: "Projects",
+        bots: 'Bots',
+        showAllWorkspaces: ({ count }: { count: number }) => `Show all ${count} workspaces`,
+        showFewerWorkspaces: 'Show fewer',
     },
 
     zen: {
@@ -575,15 +594,14 @@ export const en: TranslationStructure = {
     },
 
     toolGroup: {
-        editedFile: 'Edited file',
-        editedFiles: ({ count }: { count: number }) => count === 1 ? 'Edited 1 file' : `Edited ${count} files`,
-        readFiles: ({ count }: { count: number }) => count === 1 ? 'Read 1 file' : `Read ${count} files`,
-        ranCommands: ({ count }: { count: number }) => count === 1 ? 'Ran 1 command' : `Ran ${count} commands`,
-        searched: ({ count }: { count: number }) => count === 1 ? 'Searched 1 time' : `Searched ${count} times`,
-        fetchedUrls: ({ count }: { count: number }) => count === 1 ? 'Fetched 1 URL' : `Fetched ${count} URLs`,
-        ranTasks: ({ count }: { count: number }) => count === 1 ? 'Ran 1 task' : `Ran ${count} tasks`,
-        usedTools: ({ count }: { count: number }) => count === 1 ? 'Used 1 tool' : `Used ${count} tools`,
+        ran: 'Ran',
+        edited: 'Edited',
+        read: 'Read',
+        searched: 'Searched',
+        fetched: 'Fetched',
+        ranTask: 'Ran task',
         workedFor: ({ duration }: { duration: string }) => `Worked ${duration}`,
+        hide: 'Hide',
     },
 
     tools: {
@@ -690,6 +708,16 @@ export const en: TranslationStructure = {
         fileConflictDescription: 'This file was modified on the device while you were editing. Reload to see the latest version.',
         reload: 'Reload',
         overwrite: 'Overwrite',
+    },
+    diff: {
+        showMoreLines: ({ count }: { count: number }) => `Show ${count} more lines`,
+        tapToExpand: ({ count }: { count: number }) => `${count} changed lines — tap to expand`,
+        ignoreWhitespace: 'Ignore whitespace',
+        imageBefore: 'Before',
+        imageAfter: 'After',
+        unchangedLines: ({ count }: { count: number }) => `${count} unchanged`,
+        noChanges: 'No changes',
+        binaryFile: 'Binary file not shown',
     },
     sideChat: {
         panelTitle: 'Side chat',
@@ -871,6 +899,91 @@ export const en: TranslationStructure = {
         loginWithMobileApp: 'Login with mobile app',
     },
 
+    onboarding: {
+        // First run on phones: create an account, then link a computer from
+        // one checklist. The same checklist is the home empty state whenever
+        // no computer is reachable.
+        headline: 'Run Claude Code and Codex from your phone',
+        tagline: 'End-to-end encrypted. No email, no password.',
+        createAccount: 'Create account',
+        restoreExisting: 'Restore an existing account',
+        linkTitle: 'Link your computer',
+        installStep: 'Install Happy on your computer',
+        installBodyPrefix: 'Download Happy Desktop from ',
+        installBodyLink: 'happy.engineering',
+        installBodySuffix: '. We recommend it.',
+        terminalComment: '# Prefer the terminal?',
+        terminalInstall: 'npm install -g happy',
+        terminalRun: 'happy',
+        openStep: 'Open Happy and choose Connect phone',
+        openBody: 'During onboarding on your computer, choose Connect phone and a QR code appears. In the terminal it shows as soon as happy starts.',
+        scanStep: 'Scan the QR code',
+        scanButton: 'Scan QR code',
+        pasteLink: 'Paste link instead',
+        pasteLinkTitle: 'Paste link',
+        pasteLinkMessage: 'On your computer, choose Copy auth link, then paste it here.',
+        pasteLinkConfirm: 'Connect',
+        connecting: 'Connecting…',
+        connected: 'Connected. Opening your sessions…',
+        // Same checklist when every linked computer is offline.
+        offlineTitleOne: ({ name }: { name: string }) => `${name} is offline`,
+        offlineTitleMany: 'Your computers are offline',
+        offlineLinkedStep: ({ name }: { name: string }) => `Linked ${name}`,
+        offlineLinkedStepMany: ({ count }: { count: number }) => `Linked ${count} computers`,
+        offlineOpenStep: 'Open Happy on your computer',
+        offlineOpenBody: 'Open Happy Desktop, or run happy in a terminal. This screen updates as soon as it connects.',
+        offlineTroubleshoot: 'Troubleshoot',
+        linkAnother: 'Link another computer',
+        // Get help, bottom right of the link screen.
+        getHelp: 'Get help',
+        helpMessage: 'Stuck? Come ask us.',
+        helpDiscord: 'Ask on Discord',
+        helpBra1nDump: 'DM @bra1n_dump on X',
+        helpEx3ndr: 'DM @Ex3NDR on X',
+        helpIssues: 'Browse known issues',
+        // Gear on the link screen.
+        settingsTitle: 'Settings',
+        settingsServer: 'Server',
+        settingsServerDefault: 'Default',
+        logoutStartOver: 'Log out and start over',
+        logoutFooter: 'This account has nothing in it yet, so nothing is lost.',
+        logoutConfirmTitle: 'Log out and start over?',
+        logoutConfirmBody: 'You will go back to Create account. Nothing on your computer changes.',
+        restoreTitle: 'Restore Account',
+        restoreScan: 'Scan this code with your other phone.',
+        restoreScanPath: 'Happy › Settings › Account › Link New Device',
+        restoreUseKey: 'Use a secret key instead',
+        secretKeyTitle: 'Secret Key',
+        secretKeyBody: 'Paste your secret key. It is in Happy › Settings › Account on your other device.',
+        restoreButton: 'Restore',
+    },
+
+    troubleshoot: {
+        // Plaque at the top of the session list when every computer is
+        // offline, and the screen it opens.
+        bannerTitleOne: ({ name }: { name: string }) => `${name} is offline`,
+        bannerTitleMany: 'All machines offline',
+        bannerSubtitle: 'Troubleshoot',
+        title: 'Troubleshoot',
+        heading: 'Happy is not running on your computer',
+        intro: 'Your phone talks to Happy on your computer. When nothing is running there, everything here is offline.',
+        awakeStep: 'Is the computer awake and online?',
+        awakeBody: 'Sleep and a dropped connection are the usual causes.',
+        desktopStep: 'Is Happy Desktop open?',
+        desktopBodyPrefix: 'Open it, or download it from ',
+        desktopBodyLink: 'happy.engineering',
+        desktopBodySuffix: '. We recommend it.',
+        terminalStep: 'Using the terminal?',
+        terminalBody: 'Run happy again. The computer comes back online as soon as it starts.',
+        terminalComment: '# Not using Happy Desktop?',
+        machines: 'Machines',
+        machineOffline: 'Offline',
+        copyAiPrompt: 'Copy AI prompt',
+        copyAiPromptHint: 'Paste it into Claude Code or Codex on your computer to diagnose from the logs.',
+        copied: 'Copied',
+        copyFailed: 'Could not copy the AI prompt.',
+    },
+
     review: {
         // Used by utils/requestReview.ts
         enjoyingApp: 'Enjoying the app?',
@@ -887,7 +1000,7 @@ export const en: TranslationStructure = {
     machine: {
         launchNewSessionInDirectory: 'Launch New Session in Directory',
         offlineUnableToSpawn: 'Launcher disabled while machine is offline',
-        offlineHelp: '• Make sure your computer is online\n• Run `happy daemon status` to diagnose\n• Are you running the latest CLI version? Upgrade with `npm install -g happy@latest`',
+        offlineHelp: '• Run `happy daemon start` on your computer\n• Make sure your computer is online\n• Run `happy daemon status` to diagnose\n• Are you running the latest CLI version? Upgrade with `npm install -g happy@latest`',
         daemon: 'Daemon',
         status: 'Status',
         stopDaemon: 'Stop Daemon',
@@ -926,6 +1039,9 @@ export const en: TranslationStructure = {
         unknownEvent: 'Unknown event',
         usageLimitUntil: ({ time }: { time: string }) => `Usage limit reached until ${time}`,
         sentAsGoal: 'Sent as goal',
+        sendsAfterThisTurn: 'Sends after this turn',
+        sending: 'Sending…',
+        sendFailed: ({ reason }: { reason: string }) => `Not sent: ${reason}`,
         unknownTime: 'unknown time',
     },
 
@@ -1071,6 +1187,11 @@ export const en: TranslationStructure = {
             : `${count} images could not be uploaded and were not sent.`,
         notSupportedTitle: 'Images Not Supported',
         notSupportedMessage: 'This agent does not support image attachments. Images were not sent.',
+        attachTitle: 'Add Image',
+        pasteFromClipboard: 'Paste from Clipboard',
+        chooseFromLibrary: 'Photo Library',
+        nothingToPasteTitle: 'Nothing to Paste',
+        nothingToPasteMessage: 'Copy an image first, then try again.',
     },
 
     feed: {

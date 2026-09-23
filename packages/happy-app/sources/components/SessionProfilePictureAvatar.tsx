@@ -12,6 +12,9 @@ interface SessionProfilePictureAvatarProps {
     monochrome?: boolean;
     flavor?: string | null;
     clientId?: string | null;
+    bot?: boolean;
+    fallbackImageUrl?: string | null;
+    fallbackThumbhash?: string | null;
     editable?: boolean;
 }
 
@@ -22,6 +25,9 @@ export function SessionProfilePictureAvatar({
     monochrome,
     flavor,
     clientId,
+    bot,
+    fallbackImageUrl,
+    fallbackThumbhash,
     editable = false,
 }: SessionProfilePictureAvatarProps) {
     const styles = stylesheet;
@@ -42,7 +48,9 @@ export function SessionProfilePictureAvatar({
             monochrome={monochrome}
             flavor={flavor}
             clientId={clientId}
-            imageUrl={imageUrl}
+            bot={bot}
+            imageUrl={imageUrl ?? fallbackImageUrl}
+            thumbhash={imageUrl ? undefined : fallbackThumbhash}
         />
     );
 

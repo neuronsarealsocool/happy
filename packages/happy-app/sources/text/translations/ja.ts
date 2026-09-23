@@ -5,7 +5,7 @@
  * - Functions with typed object parameters for dynamic text
  */
 
-import { TranslationStructure } from "../_default";
+import { en, type TranslationStructure } from "../_default";
 
 /**
  * Japanese plural helper function
@@ -18,10 +18,17 @@ function plural({ count, singular, plural }: { count: number; singular: string; 
 }
 
 export const ja: TranslationStructure = {
+    voiceStatusBar: {
+        tapToEnd: 'タップして終了',
+        connecting: '接続中…',
+        error: '接続エラー',
+        active: '音声アシスタント作動中',
+    },
+
     tabs: {
         // Tab navigation labels
         inbox: '受信トレイ',
-        sessions: 'ターミナル',
+        sessions: 'セッション',
         settings: '設定',
     },
 
@@ -60,6 +67,7 @@ export const ja: TranslationStructure = {
         fileViewer: 'ファイルビューアー',
         loading: '読み込み中...',
         retry: '再試行',
+        loadMore: 'さらに読み込む',
         delete: '削除',
         optional: '任意',
         saveAs: '名前を付けて保存',
@@ -83,6 +91,7 @@ export const ja: TranslationStructure = {
         offline: 'オフライン',
         lastSeen: ({ time }: { time: string }) => `最終アクセス: ${time}`,
         permissionRequired: '権限が必要です',
+        inputRequired: '回答を待っています',
         activeNow: 'アクティブ',
         unknown: '不明',
         unread: '新しい結果',
@@ -164,13 +173,6 @@ export const ja: TranslationStructure = {
         },
         chat: 'チャット',
         chatDescription: 'チャットメッセージの見た目をカスタマイズ',
-        sessionStatusBar: 'セッションステータス情報',
-        sessionStatusBarDescription: 'ブランチ、モデル、エフォート、コンテキストの表示場所を選択',
-        sessionStatusDisplayOptions: {
-            hidden: '非表示',
-            above: '入力欄の上',
-            below: '入力欄の下',
-        },
         usageLimitShowRemaining: '残量を表示',
         usageLimitShowRemainingDescription: '上限を使用量ではなく残量で表示します',
         userMessageBubbleColor: 'ユーザーバブルの色',
@@ -187,33 +189,36 @@ export const ja: TranslationStructure = {
         displayDescription: 'レイアウトと間隔を調整',
         compactToolCalls: 'ツール呼び出しをコンパクト表示',
         compactToolCallsDescription: '非対話型のツール呼び出しを1行で表示し、行を開いて詳細を確認します',
-        inlineToolCalls: 'ツール呼び出しをインライン表示',
-        inlineToolCallsDescription: 'チャットメッセージ内にツール呼び出しを直接表示',
-        expandTodoLists: 'Todoリストを展開',
-        expandTodoListsDescription: '変更点だけでなくすべてのTodoを表示',
-        showLineNumbersInDiffs: '差分に行番号を表示',
-        showLineNumbersInDiffsDescription: 'コード差分に行番号を表示',
         showLineNumbersInToolViews: 'ツールビューに行番号を表示',
         showLineNumbersInToolViewsDescription: 'ツールビューの差分に行番号を表示',
-        wrapLinesInDiffs: '差分で行を折り返し',
-        wrapLinesInDiffsDescription: '差分表示で水平スクロールの代わりに長い行を折り返す',
-        diffStyle: '差分表示',
-        diffStyleDescription: '差分を1列（unified）または横並び（split）で表示します。split 表示は Web 専用です。',
-        diffStyleOptions: {
-            unified: 'Unified',
-            split: 'Split',
-        },
-        alwaysShowContextSize: '常にコンテキストサイズを表示',
-        alwaysShowContextSizeDescription: '上限に近づいていなくてもコンテキスト使用量を表示',
-        avatarStyle: 'アバタースタイル',
-        avatarStyleDescription: 'セッションアバターの外観を選択',
-        avatarOptions: {
+        alwaysShowContextSize: '使用状況を表示',
+        alwaysShowContextSizeDescription: '入力欄の下にコンテキストとプラン使用量を表示。上限間近の警告は常に表示されます。',
+        input: '入力',
+        inputDescription: 'メッセージ入力の設定',
+        showHarnessIconInSessionHeader: 'セッションヘッダーにハーネスアイコンを表示',
+        showHarnessIconInSessionHeaderDescription: 'セッションヘッダーにハーネスアイコンを表示',
+        showHarnessIconsInSessionList: 'セッションリストにハーネスアイコンを表示',
+        showHarnessIconsInSessionListDescription: 'セッションリストのアバターにハーネスアイコンを表示',
+        avatars: 'アバター',
+        avatarsDescription: '生成されるセッションアバターの見た目を選択',
+        avatarStyle: 'アバターのスタイル',
+        avatarStyleOptions: {
+            brutalist: 'ブルータリズム',
             pixelated: 'ピクセル',
             gradient: 'グラデーション',
-            brutalist: 'ブルータリスト',
         },
-        showFlavorIcons: 'AIプロバイダーアイコンを表示',
-        showFlavorIconsDescription: 'セッションアバターにAIプロバイダーアイコンを表示',
+        avatarMonochrome: '白黒アバター',
+        avatarMonochromeDescription: 'アバターを色なしで表示',
+    },
+
+    sessionsFilter: {
+        // Filter menu on the home sessions list header
+        title: 'フィルター',
+        groupingTitle: 'グループ化',
+        flatList: 'フラットリスト',
+        groupByProject: 'プロジェクト別にグループ化',
+        appearanceSettings: '外観設定',
+        worktreeTabs: ({ count }: { count: number }) => `${count} 個のタブ`,
     },
 
     settingsFeatures: {
@@ -233,17 +238,8 @@ export const ja: TranslationStructure = {
         commandPaletteDisabled: 'クイックコマンドアクセスは無効',
         markdownCopyV2: 'Markdownコピー v2',
         markdownCopyV2Subtitle: '長押しでコピーモーダルを開く',
-        hideInactiveSessions: '非アクティブセッションを非表示',
-        hideInactiveSessionsSubtitle: 'アクティブなチャットのみをリストに表示',
         groupToolCalls: 'ツール呼び出しをグループ化',
         groupToolCallsSubtitle: '連続するツール呼び出しを1つのコンテナにまとめる',
-        privacy: 'プライバシー',
-        privacyDescription: 'すべての分析とテレメトリを完全に無効にします。PostHogやその他のトラッキングサービスにデータは送信されません。',
-        disableAnalytics: '分析を無効化',
-        analyticsDisabled: 'すべてのトラッキングとテレメトリが無効',
-        analyticsEnabled: '匿名の使用状況分析がアクティブ',
-        imageUpload: '画像アップロード',
-        imageUploadSubtitle: '対応エージェントに分析させるため、メッセージに画像を添付する',
     },
 
     errors: {
@@ -336,6 +332,9 @@ export const ja: TranslationStructure = {
         forkErrorMissingMetadata: 'フォークに必要なセッションのメタデータがありません。',
         forkErrorGeneric: 'セッションのフォークに失敗しました。',
         forkClaudeOnly: 'フォークは現在 Claude セッションのみ対応しています。',
+        archiveAction: 'アーカイブ',
+        startingChat: '新しいチャットを開始しています…',
+        actionsTitle: 'セッション',
     },
 
     commandPalette: {
@@ -343,6 +342,9 @@ export const ja: TranslationStructure = {
     },
 
     server: {
+        title: en.server.title,
+        serverUrlLabel: en.server.serverUrlLabel,
+        selfHostFooter: en.server.selfHostFooter,
         // Used by Server Configuration screen (app/(app)/server.tsx)
         serverConfiguration: 'サーバー設定',
         enterServerUrl: 'サーバーURLを入力してください',
@@ -357,7 +359,12 @@ export const ja: TranslationStructure = {
         failedToConnectToServer: 'サーバーへの接続に失敗しました',
         currentlyUsingCustomServer: '現在カスタムサーバーを使用中',
         customServerUrlLabel: 'カスタムサーバーURL',
-        advancedFeatureFooter: "これは高度な機能です。何をしているか理解している場合のみサーバーを変更してください。サーバー変更後は再度ログインが必要です。"
+        advancedFeatureFooter: "これは高度な機能です。何をしているか理解している場合のみサーバーを変更してください。サーバー変更後は再度ログインが必要です。",
+        services: 'サービス',
+        useCustomServerForVoice: '音声にカスタムサーバーを使用',
+        customServerVoiceEnabled: '音声認証情報と使用量はカスタムサーバーを使用します',
+        customServerVoiceDisabled: '音声は Happy Cloud と Happy サブスクリプションを使用します',
+        customServerVoiceFooter: 'オフの場合、音声の開始時に Happy Cloud と ElevenLabs へ接続します。カスタムサーバーで音声が設定済みの場合のみオンにしてください。',
     },
 
     sessionInfo: {
@@ -387,11 +394,12 @@ export const ja: TranslationStructure = {
         quickActions: 'クイックアクション',
         viewMachine: 'マシンを表示',
         viewMachineSubtitle: 'マシンの詳細とセッションを表示',
+        viewChanges: '変更を表示',
+        viewChangesSubtitle: '未コミットのすべてのファイルの差分',
         resumeSession: 'Resume Session',
         resumeSessionSubtitle: 'Resume this session on the same machine',
         resumeSessionSameMachineOnly: 'This session can only be resumed on the same machine it started on.',
         resumeSessionMachineOffline: 'This machine is offline. Resume is only available while it is online.',
-        resumeSessionNeedsHappyAgent: 'Resume is unavailable on this machine. Run `happy-agent auth login` to enable it.',
         resumeSessionMissingMachine: 'This session is missing its machine metadata, so it cannot be resumed.',
         resumeSessionMissingBackendId: 'This session does not have a resumable Claude or Codex identifier.',
         resumeSessionUnexpectedDirectoryPrompt: 'Resume cannot create directories. Start the session manually from its original path.',
@@ -430,6 +438,7 @@ export const ja: TranslationStructure = {
 
     components: {
         emptyMainScreen: {
+            ...en.components.emptyMainScreen,
             // Used by EmptyMainScreen component
             readyToCode: 'コーディングを始めますか？',
             installCli: 'Agentic Messenger CLIをインストール',
@@ -444,20 +453,15 @@ export const ja: TranslationStructure = {
             stopGoal: '目標を停止',
             editGoal: '目標を編集',
         },
-        sessionStatusBar: {
-            contextUsage: ({ used, total, percent }: { used: string; total: string; percent: number }) => `コンテキスト ${total}トークン中${used}、${percent}%`,
-            limitFiveHour: '5時間の上限',
-            limitSevenDay: '7日間の上限',
-            limitResets: ({ time }: { time: string }) => `${time} リセット`,
-            limitAsOf: ({ age }: { age: string }) => `${age}前のデータ`,
-            limitRemaining: ({ percent }: { percent: number }) => `残り ${percent}%`,
-        },
     },
 
     agentInput: {
         permissionMode: {
             title: '権限モード',
+            auto: '自分で判断し、迷ったら確認します',
             default: 'デフォルト',
+            agyDefault: 'agy サンドボックス、確認なし',
+            openclawInert: 'openclaw では適用されません',
             acceptEdits: '編集を許可',
             plan: 'プランモード',
             dontAsk: '確認しない',
@@ -486,6 +490,7 @@ export const ja: TranslationStructure = {
             safeYolo: 'セーフYOLO',
             yolo: 'YOLO',
             defaultDescription: '信頼されていないコマンドの前に確認',
+            autoDescription: '自分で判断し、迷ったら確認します',
             readOnlyDescription: '書き込みなし',
             safeYoloDescription: '確認なし、ワークスペースサンドボックス',
             yoloDescription: '確認なし、フルアクセス',
@@ -514,7 +519,14 @@ export const ja: TranslationStructure = {
             badgePlan: 'プラン',
         },
         context: {
-            remaining: ({ percent }: { percent: number }) => `残り ${percent}%`,
+            detailContext: ({ used, total }: { used: string; total: string }) => `コンテキスト ${used} / ${total}`,
+            percentContext: ({ percent }: { percent: number }) => `コンテキスト ${percent}%`,
+            percentWeek: ({ percent }: { percent: number }) => `週 ${percent}%`,
+        },
+        usagePopup: {
+            session: 'セッション',
+            week: '週',
+            resets: ({ time }: { time: string }) => `リセット ${time}`,
         },
         suggestion: {
             fileLabel: 'ファイル',
@@ -550,6 +562,9 @@ export const ja: TranslationStructure = {
         hideArchived: 'アーカイブを非表示',
         newSession: '新しいセッション',
         projects: "プロジェクト",
+        bots: 'ボット',
+        showAllWorkspaces: ({ count }: { count: number }) => `${count}件のワークスペースをすべて表示`,
+        showFewerWorkspaces: '表示を減らす',
     },
 
     zen: {
@@ -562,15 +577,14 @@ export const ja: TranslationStructure = {
     },
 
     toolGroup: {
-        editedFile: 'Edited file',
-        editedFiles: ({ count }: { count: number }) => `${count}個のファイルを編集`,
-        readFiles: ({ count }: { count: number }) => `${count}個のファイルを読み取り`,
-        ranCommands: ({ count }: { count: number }) => `${count}個のコマンドを実行`,
-        searched: ({ count }: { count: number }) => `${count}回検索`,
-        fetchedUrls: ({ count }: { count: number }) => `${count}個のURLを取得`,
-        ranTasks: ({ count }: { count: number }) => `${count}個のタスクを実行`,
-        usedTools: ({ count }: { count: number }) => `${count}個のツールを使用`,
+        ran: '実行',
+        edited: '編集',
+        read: '読み取り',
+        searched: '検索',
+        fetched: '取得',
+        ranTask: 'タスク実行',
         workedFor: ({ duration }: { duration: string }) => `Worked ${duration}`,
+        hide: '非表示',
     },
 
     tools: {
@@ -677,6 +691,16 @@ export const ja: TranslationStructure = {
         fileConflictDescription: '編集中にデバイス上でファイルが変更されました。最新版を表示するには再読み込みしてください。',
         reload: '再読み込み',
         overwrite: '上書き',
+    },
+    diff: {
+        showMoreLines: ({ count }: { count: number }) => `さらに${count}行を表示`,
+        tapToExpand: ({ count }: { count: number }) => `${count}行の変更 — タップして展開`,
+        ignoreWhitespace: '空白を無視',
+        imageBefore: '変更前',
+        imageAfter: '変更後',
+        unchangedLines: ({ count }: { count: number }) => `${count}行は変更なし`,
+        noChanges: '変更なし',
+        binaryFile: 'バイナリファイルは表示されません',
     },
     sideChat: {
         panelTitle: 'サイドチャット',
@@ -849,6 +873,14 @@ export const ja: TranslationStructure = {
         friends: '友達',
     },
 
+    onboarding: {
+        ...en.onboarding,
+    },
+
+    troubleshoot: {
+        ...en.troubleshoot,
+    },
+
     welcome: {
         // Main welcome screen for unauthenticated users
         title: 'CodexとClaude Codeのモバイルクライアント',
@@ -913,6 +945,9 @@ export const ja: TranslationStructure = {
         unknownEvent: '不明なイベント',
         usageLimitUntil: ({ time }: { time: string }) => `${time}まで使用制限中`,
         sentAsGoal: 'Sent as goal',
+        sendsAfterThisTurn: 'Sends after this turn',
+        sending: 'Sending…',
+        sendFailed: ({ reason }: { reason: string }) => `未送信: ${reason}`,
         unknownTime: '不明な時間',
     },
 
@@ -1058,6 +1093,11 @@ export const ja: TranslationStructure = {
             : `${count}枚の画像をアップロードできず、送信されませんでした。`,
         notSupportedTitle: '画像はサポートされていません',
         notSupportedMessage: 'このエージェントは画像の添付に対応していません。画像は送信されませんでした。',
+        attachTitle: '画像を追加',
+        pasteFromClipboard: 'クリップボードから貼り付け',
+        chooseFromLibrary: 'フォトライブラリ',
+        nothingToPasteTitle: '貼り付けるものがありません',
+        nothingToPasteMessage: '先に画像をコピーしてから、もう一度お試しください。',
     },
 
     feed: {

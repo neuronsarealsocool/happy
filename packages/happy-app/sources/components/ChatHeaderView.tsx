@@ -9,6 +9,8 @@ import { layout } from '@/components/layout';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { MobileGlassSurface } from './MobileGlass';
 import { BubblePressable } from './BubblePressable';
+import { GitLineChanges } from './GitLineChanges';
+import type { VisibleRigGitLineChanges } from '@/utils/rigGitLineChanges';
 import {
     MOBILE_GLASS_CONTROL_RADIUS,
     MOBILE_GLASS_CONTROL_SIZE,
@@ -22,6 +24,9 @@ import {
 
 interface ChatHeaderViewProps {
     title: string;
+    /** Upstream-compatible alias for the secondary header line. */
+    subtitle?: string;
+    gitChanges?: VisibleRigGitLineChanges | null;
     /** Project folder name (last path segment) */
     folderName?: string;
     /** Optional client/provider/model identity shown below the session title. */
@@ -44,6 +49,8 @@ interface ChatHeaderViewProps {
 // dense native blur at rest and let it feather past the controls into content.
 export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
     title,
+    subtitle,
+    gitChanges = null,
     folderName,
     identityLine,
     extraPathSegment,
@@ -62,7 +69,8 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
     const hasExtra = !!extraPathSegment;
     const glassEnabled = !isTablet && Platform.OS !== 'web' && !isRunningOnMac();
     const contentHeight = glassEnabled ? Math.max(headerHeight, MOBILE_GLASS_HEADER_HEIGHT) : headerHeight;
-    const showFolderSubtitle = !!folderName && folderName !== title;
+    const resolvedFolderName = folderName;
+    const showFolderSubtitle = !!resolvedFolderName && resolvedFolderName !== title;
     const folderNameColor = glassEnabled
         ? theme.dark ? 'rgba(255, 255, 255, 0.78)' : 'rgba(24, 23, 28, 0.72)'
         : theme.colors.textSecondary;
@@ -105,15 +113,15 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                             onPress={onTitlePress}
                             disabled={!onTitlePress}
                         >
-                            {folderName ? (
+                            {resolvedFolderName ? (
                                 <View style={styles.webTitleRow}>
                                     <Text
                                         numberOfLines={1}
                                         style={[styles.webFolderName, { color: theme.colors.textSecondary, ...Typography.default() }]}
                                     >
-                                        {folderName}
+                                        {resolvedFolderName}
                                     </Text>
-                                    {title && title !== folderName && (
+                                    {title && title !== resolvedFolderName && (
                                         <>
                                             <Text style={[styles.webSeparator, { color: theme.colors.textSecondary, ...Typography.default() }]}>/</Text>
                                             <Text
@@ -151,6 +159,16 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                                     {title}
                                 </Text>
                             )}
+                            {(subtitle || gitChanges) ? (
+                                <View style={styles.subtitleRow}>
+                                    {subtitle ? (
+                                        <Text style={[styles.folderName, { color: theme.colors.textSecondary, ...Typography.default() }]}>
+                                            {subtitle}
+                                        </Text>
+                                    ) : null}
+                                    <GitLineChanges changes={gitChanges} />
+                                </View>
+                            ) : null}
                             {identityLine ? (
                                 <Text
                                     numberOfLines={1}
@@ -184,20 +202,20 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                     { color: theme.colors.header.tint, ...Typography.default('semiBold') },
                 ]}
             >
-                {title || folderName}
+                {title || resolvedFolderName}
             </Text>
-            {(showFolderSubtitle || hasExtra) && (
+            {(subtitle || showFolderSubtitle || hasExtra || gitChanges) && (
                 <View style={[styles.subtitleRow, glassEnabled && styles.mobileSubtitleRow]}>
-                    {showFolderSubtitle && (
+                    {(subtitle || showFolderSubtitle) && (
                         <Text
                             numberOfLines={1}
                             ellipsizeMode="tail"
                             style={[styles.folderName, { color: folderNameColor, ...Typography.default() }]}
                         >
-                            {folderName}
+                            {subtitle ?? resolvedFolderName}
                         </Text>
                     )}
-                    {showFolderSubtitle && hasExtra && (
+                    {(subtitle || showFolderSubtitle) && hasExtra && (
                         <Text style={[styles.separator, { color: theme.colors.textSecondary, ...Typography.default() }]}>•</Text>
                     )}
                     {hasExtra && (
@@ -209,6 +227,7 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                             {extraPathSegment}
                         </Text>
                     )}
+                    <GitLineChanges changes={gitChanges} />
                 </View>
             )}
             {identityLine ? (

@@ -5,13 +5,41 @@ const serverConfigStorage = new MMKV({ id: 'server-config' });
 
 const SERVER_KEY = 'custom-server-url';
 const LOG_SERVER_KEY = 'log-server-url';
+const USE_CUSTOM_SERVER_FOR_VOICE_KEY = 'use-custom-server-for-voice';
 const DEFAULT_SERVER_URL = 'https://api.cluster-fluster.com';
 
 export function getServerUrl(): string {
+    // A selected private run must not silently reuse a previously persisted
+    // server (including another loopback run). Production ignores this path.
+    if (__DEV__ && process.env.EXPO_PUBLIC_HARNESS_MODE === '1') {
+        const configured = process.env.EXPO_PUBLIC_HAPPY_SERVER_URL;
+        if (!configured) throw new Error('Harness startup requires its explicit server URL.');
+        const parsed = new URL(configured);
+        if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]', '::1'].includes(parsed.hostname)
+            || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+            throw new Error('Harness startup requires a plain loopback HTTP origin.');
+        }
+        return parsed.origin;
+    }
     return serverConfigStorage.getString(SERVER_KEY) ||
            (globalThis as any).__HAPPY_CONFIG__?.serverUrl ||
            process.env.EXPO_PUBLIC_HAPPY_SERVER_URL ||
            DEFAULT_SERVER_URL;
+}
+
+export function rewriteLoopbackHost(url: string): string {
+    try {
+        const target = new URL(url);
+        if (target.hostname !== 'localhost' && target.hostname !== '127.0.0.1' && target.hostname !== '::1') {
+            return url;
+        }
+        const reachable = new URL(getServerUrl());
+        target.protocol = reachable.protocol;
+        target.host = reachable.host;
+        return target.toString();
+    } catch {
+        return url;
+    }
 }
 
 export function setServerUrl(url: string | null): void {
@@ -20,6 +48,22 @@ export function setServerUrl(url: string | null): void {
     } else {
         serverConfigStorage.delete(SERVER_KEY);
     }
+}
+
+export function shouldUseCustomServerForVoice(): boolean {
+    return isUsingCustomServer() && serverConfigStorage.getBoolean(USE_CUSTOM_SERVER_FOR_VOICE_KEY) === true;
+}
+
+export function setUseCustomServerForVoice(enabled: boolean): void {
+    if (enabled) {
+        serverConfigStorage.set(USE_CUSTOM_SERVER_FOR_VOICE_KEY, true);
+    } else {
+        serverConfigStorage.delete(USE_CUSTOM_SERVER_FOR_VOICE_KEY);
+    }
+}
+
+export function getVoiceServerUrl(): string {
+    return shouldUseCustomServerForVoice() ? getServerUrl() : DEFAULT_SERVER_URL;
 }
 
 export function getLogServerUrl(): string | null {

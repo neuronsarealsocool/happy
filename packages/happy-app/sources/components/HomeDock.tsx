@@ -456,7 +456,7 @@ export const HomeDock = React.memo(({
     const [isFocused, setIsFocused] = React.useState(false);
     const [focusModeVisible, setFocusModeVisible] = React.useState(false);
     const [focusedInputContentHeight, setFocusedInputContentHeight] = React.useState(0);
-    const expImageUpload = useSetting('expImageUpload');
+    const expImageUpload = true;
     const { selectedImages, pickImages, removeImage, clearImages } = useImagePicker();
     const agentType = useNewSessionDraft((state) => state.agentType);
     const selectedMachineId = useNewSessionDraft((state) => state.selectedMachineId);
@@ -961,16 +961,10 @@ export const HomeDock = React.memo(({
             key={row.page}
             title={config.title}
             triggerLabel={row.value}
-            systemImage={{
-                machine: 'desktopcomputer',
-                project: 'folder',
-                worktree: 'arrow.triangle.branch',
-                agent: 'cpu',
-                model: 'cube',
-                permission: 'shield',
-                effort: 'bolt',
-            }[row.page]}
-            options={config.options.map((option) => ({ key: option.key, label: option.name }))}
+            sections={[{
+                key: row.page,
+                options: config.options.map((option) => ({ key: option.key, label: option.name })),
+            }]}
             selectedKey={config.selectedKey}
             onSelect={config.onSelect}
         >

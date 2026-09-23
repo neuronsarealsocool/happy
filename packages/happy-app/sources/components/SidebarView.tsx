@@ -104,7 +104,6 @@ export const SidebarView = React.memo(() => {
     const handleArchiveVisibility = React.useCallback(() => {
         setHideArchivedSessions(!hideArchivedSessions);
     }, [hideArchivedSessions, setHideArchivedSessions]);
-
     return (
         <View
             {...(Platform.OS === 'web' ? {

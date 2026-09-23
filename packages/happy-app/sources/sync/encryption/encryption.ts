@@ -38,9 +38,10 @@ export class Encryption {
 
     // Session and machine encryption management
     private sessionEncryptions = new Map<string, SessionEncryption>();
-    private sessionDataKeys = new Map<string, Uint8Array | null>();
     private machineEncryptions = new Map<string, MachineEncryption>();
     private sessionBlobKeys = new Map<string, Uint8Array>();
+    private sessionDataKeys = new Map<string, Uint8Array>();
+    private sessionReconnectDataKeys = new Map<string, Uint8Array | null>();
     private cache: EncryptionCache;
 
     private constructor(anonID: string, masterSecret: Uint8Array, contentKeyPair: sodium.KeyPair, masterBlobKey: Uint8Array) {
@@ -74,7 +75,7 @@ export class Encryption {
      */
     async initializeSessions(sessions: Map<string, Uint8Array | null>): Promise<void> {
         for (const [sessionId, dataKey] of sessions) {
-            this.sessionDataKeys.set(sessionId, dataKey?.slice() ?? null);
+            this.sessionReconnectDataKeys.set(sessionId, dataKey?.slice() ?? null);
             // Skip if already initialized
             if (this.sessionEncryptions.has(sessionId)) {
                 continue;
@@ -99,6 +100,13 @@ export class Encryption {
                 ? await deriveKey(dataKey, 'Happy Blobs', ['session'])
                 : this.masterBlobKey;
             this.sessionBlobKeys.set(sessionId, blobKey);
+
+            // The raw per-session data key is kept so it can be handed to the
+            // machine that owns the session when resuming it (see
+            // machineResumeSession): the daemon has no way to derive it.
+            if (dataKey) {
+                this.sessionDataKeys.set(sessionId, dataKey);
+            }
         }
     }
 
@@ -114,10 +122,10 @@ export class Encryption {
         key: Uint8Array;
         variant: 'legacy' | 'dataKey';
     } | null {
-        if (!this.sessionDataKeys.has(sessionId)) {
+        if (!this.sessionReconnectDataKeys.has(sessionId)) {
             return null;
         }
-        const dataKey = this.sessionDataKeys.get(sessionId) ?? null;
+        const dataKey = this.sessionReconnectDataKeys.get(sessionId) ?? null;
         return dataKey
             ? { key: dataKey.slice(), variant: 'dataKey' }
             : { key: this.masterSecret.slice(), variant: 'legacy' };
@@ -128,10 +136,20 @@ export class Encryption {
      */
     removeSessionEncryption(sessionId: string): void {
         this.sessionEncryptions.delete(sessionId);
-        this.sessionDataKeys.delete(sessionId);
         this.sessionBlobKeys.delete(sessionId);
+        this.sessionDataKeys.delete(sessionId);
+        this.sessionReconnectDataKeys.delete(sessionId);
         // Also clear any cached data for this session
         this.cache.clearSessionCache(sessionId);
+    }
+
+    /**
+     * Raw per-session AES key. Only present for sessions that carry their own
+     * dataEncryptionKey; legacy sessions encrypt with the account master
+     * secret, which must never leave the client.
+     */
+    getSessionDataKey(sessionId: string): Uint8Array | null {
+        return this.sessionDataKeys.get(sessionId) ?? null;
     }
 
     /**
@@ -142,6 +160,13 @@ export class Encryption {
      */
     getSessionBlobKey(sessionId: string): Uint8Array | null {
         return this.sessionBlobKeys.get(sessionId) ?? null;
+    }
+
+    /** Return the domain-separated blob key used by project avatar blobs. */
+    async getProjectBlobKey(dataKey: Uint8Array | null): Promise<Uint8Array> {
+        return dataKey
+            ? deriveKey(dataKey, 'Happy Blobs', ['session'])
+            : this.masterBlobKey;
     }
 
     //

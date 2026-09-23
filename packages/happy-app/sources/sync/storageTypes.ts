@@ -1,10 +1,29 @@
 import { z } from "zod";
+import { RigBotSchema } from '@slopus/happy-wire';
+import type { SessionAvatarDescriptor } from './sessionAvatarTypes';
+import type { ProjectAvatar } from './projectTypes';
 
 //
 // Agent states
 //
 
+export const RigComposerModeSchema = z.object({
+    providerId: z.string(),
+    modelId: z.string(),
+    effort: z.string(),
+    serviceTier: z.string().nullable(),
+    permissionMode: z.string(),
+});
+
+export const RigComposerDraftSchema = RigComposerModeSchema.extend({
+    text: z.string(),
+});
+
+export type RigComposerMode = z.infer<typeof RigComposerModeSchema>;
+export type RigComposerDraft = z.infer<typeof RigComposerDraftSchema>;
+
 export const MetadataSchema = z.object({
+    bot: RigBotSchema.optional(),
     models: z.array(z.object({
         code: z.string(),
         value: z.string(),
@@ -65,10 +84,21 @@ export const MetadataSchema = z.object({
     }).passthrough().optional(),
     session: z.object({
         status: z.string(),
-        permissionMode: z.string(),
+        /** @deprecated Display mirror; `draft` / `lastMode` carry the selection. */
+        permissionMode: z.string().optional(),
         modelLocked: z.boolean(),
         serviceTier: z.string().optional(),
     }).passthrough().optional(),
+    /**
+     * Happy Agent composer synchronization. `draft` is the whole composer
+     * (text plus every picker), `draftUpdatedAt` orders edits and clears
+     * across devices (null = never edited), and `lastMode` is what the daemon
+     * last accepted a message with. Only `draft` and `draftUpdatedAt` are
+     * written by the app, always together; `lastMode` is daemon-owned.
+     */
+    draft: RigComposerDraftSchema.nullish().catch(undefined),
+    draftUpdatedAt: z.number().int().nonnegative().nullish().catch(undefined),
+    lastMode: RigComposerModeSchema.nullish().catch(undefined),
     capabilities: z.object({
         abort: z.boolean(),
         attachments: z.object({
@@ -82,6 +112,11 @@ export const MetadataSchema = z.object({
             search: z.boolean(),
             write: z.boolean(),
         }).passthrough(),
+        // Daemon emits `user-message-accepted` receipts when a message enters
+        // the agent's context. Optional: absent on daemons that predate it,
+        // and the app must not hold messages for those — with no receipt ever
+        // coming, a held message would stay "Sending…" forever.
+        messageReceipts: z.boolean().optional(),
         modelSelection: z.boolean(),
         reasoningSelection: z.boolean(),
         permissionModeSelection: z.boolean(),
@@ -117,6 +152,24 @@ export const MetadataSchema = z.object({
         text: z.string(),
         updatedAt: z.number()
     }).optional(),
+    /**
+     * When the session last did something a person would call activity: the
+     * newest visible user message, visible agent text, or user-facing question.
+     * Tool calls, tool results, reasoning, permission prompts, heartbeats and
+     * metadata writes deliberately do not advance it, so a long tool-only tail
+     * cannot float a session to the top of the list.
+     *
+     * The agent publishes it, so every device sorts the same way — unlike
+     * `Session.lastMessageSentAt`, which only knows what this device sent.
+     */
+    lastMeaningfulMessageAt: z.number().optional(),
+    /** Rig's branch/worktree comparison against its merge base with origin/main. */
+    git: z.object({
+        changedFiles: z.number().int().nonnegative(),
+        countsExact: z.boolean(),
+        deletions: z.number().int().nonnegative(),
+        insertions: z.number().int().nonnegative(),
+    }).passthrough().optional(),
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(), // Claude Code session ID
     codexThreadId: z.string().optional(), // Codex app-server thread ID
@@ -332,6 +385,11 @@ export const AgentStateSchema = z.object({
         reason: z.string().nullish(),
         mode: z.string().nullish(),
         allowedTools: z.array(z.string()).nullish(),
+        // The CLI completes a request by echoing the RPC's own field name,
+        // `allowTools`, so every deployed CLI reports the "don't ask again"
+        // grant under this key. Declared here so parsing keeps it; the
+        // reducer folds it into `allowedTools` when reading.
+        allowTools: z.array(z.string()).nullish(),
         decision: z.enum(['approved', 'approved_for_session', 'denied', 'abort']).nullish(),
         toolUseId: z.string().nullish()
     })).nullish(),
@@ -361,13 +419,26 @@ export interface SessionAgentModesPatch {
     effortLevel?: string | null;
 }
 
+/** Happy Agent composer fields mirrored on the session; see rigComposer.ts. */
+export type SessionComposerPatch = Partial<Pick<Session,
+    'draft' | 'draftUpdatedAt' | 'permissionMode' | 'modelMode' | 'effortLevel' | 'serviceTier'
+>>;
+
 export interface Session {
     id: string,
+    avatarDescriptor?: SessionAvatarDescriptor | null,
+    avatar?: ProjectAvatar | null,
+    /** Local account-event watermark; not the session message sequence. */
+    avatarUpdateSeq?: number,
+    /** Server avatar revision, including explicit removal snapshots. */
+    avatarRevision?: number,
     seq: number,
     createdAt: number,
     updatedAt: number,
     active: boolean,
     activeAt: number,
+    /** Account-scoped Project linkage supplied beside the encrypted session. */
+    projectId?: string | null,
     metadata: Metadata | null,
     metadataVersion: number,
     agentState: AgentState | null,
@@ -376,10 +447,14 @@ export interface Session {
     thinkingAt: number,
     presence: "online" | number, // "online" when active, timestamp when last seen
     todos?: TodoItem[];
-    draft?: string | null; // Local draft message, not synced to server
+    draft?: string | null; // Draft text. Device-local, except Happy Agent sessions sync it through metadata.draft and also persist the pending composer so offline edits survive restart.
+    /** Happy Agent only: stamp of the newest composer state this device holds; null = never edited. */
+    draftUpdatedAt?: number | null;
     permissionMode?: string | null; // Permission pick; local mirror of synced metadata.permissionMode (#1492)
     modelMode?: string | null; // Model pick; local mirror of synced metadata.modelMode (#1492)
     effortLevel?: string | null; // Effort pick; local mirror of synced metadata.effortLevel (#1492)
+    /** Happy Agent only: service tier carried in the composer draft; the UI does not expose it. */
+    serviceTier?: string | null;
     lastMessageSentAt?: number; // Local timestamp of last user-sent message, not synced to server; used for activity-based sort
     // IMPORTANT: latestUsage is extracted from reducerState.latestUsage after message processing.
     // We store it directly on Session to ensure it's available immediately on load.
@@ -443,6 +518,7 @@ export const MachineMetadataSchema = z.object({
         version: z.string(),
     }).passthrough().optional(),
     capabilities: z.object({
+        bots: z.boolean().optional(),
         newSession: z.boolean().optional(),
         resume: z.boolean().optional(),
         worktrees: z.boolean().optional(),

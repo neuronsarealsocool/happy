@@ -2,8 +2,8 @@ import { Stack } from 'expo-router';
 import 'react-native-reanimated';
 import * as React from 'react';
 import { Typography } from '@/constants/Typography';
-import { createHeader } from '@/components/navigation/Header';
-import { Platform, TouchableOpacity, Text, View } from 'react-native';
+import { createHeader, createPlainHeader } from '@/components/navigation/Header';
+import { Platform, TouchableOpacity, Text, View, Image } from 'react-native';
 import { isRunningOnMac } from '@/utils/platform';
 import { useUnistyles } from 'react-native-unistyles';
 import { t } from '@/text';
@@ -14,8 +14,8 @@ export const unstable_settings = {
 };
 
 export default function RootLayout() {
-    // Keep UIKit in charge of iPhone/iPad headers. A custom React header makes
-    // native-stack animate every blur/glass subview during each push and pop.
+    // Keep UIKit in charge of most iPhone/iPad headers. Screens that belong to
+    // the floating-glass family opt into createHeader below.
     const shouldUseCustomHeader = Platform.OS === 'android' || isRunningOnMac() || Platform.OS === 'web';
     const isDesktop = Platform.OS === 'web' || isRunningOnMac();
     const { theme } = useUnistyles();
@@ -72,8 +72,13 @@ export default function RootLayout() {
                 name="settings/index"
                 options={{
                     headerShown: true,
+                    header: createPlainHeader,
                     headerTitle: t('settings.title'),
-                    headerBackTitle: t('common.home')
+                    headerBackTitle: t('common.home'),
+                    headerTransparent: Platform.OS === 'ios',
+                    headerStyle: {
+                        backgroundColor: theme.colors.groupped.background,
+                    },
                 }}
             />
             <Stack.Screen
@@ -86,6 +91,11 @@ export default function RootLayout() {
                 name="session/[id]/message/[messageId]"
                 options={{
                     headerShown: true,
+                    // Use the shared plain title from the first frame, even
+                    // before the message has loaded. Never swap UIKit chrome
+                    // for a differently measured tool header after hydration.
+                    header: createPlainHeader,
+                    headerTitleAlign: 'center',
                     headerBackTitle: t('common.back'),
                     headerTitle: t('common.message')
                 }}
@@ -94,8 +104,26 @@ export default function RootLayout() {
                 name="session/[id]/info"
                 options={{
                     headerShown: true,
+                    header: createPlainHeader,
                     headerTitle: '',
                     headerBackTitle: t('common.back'),
+                    headerTransparent: Platform.OS === 'ios',
+                    headerStyle: {
+                        backgroundColor: theme.colors.groupped.background,
+                    },
+                }}
+            />
+            <Stack.Screen
+                name="machine/[id]"
+                options={{
+                    headerShown: true,
+                    header: createPlainHeader,
+                    headerTitle: '',
+                    headerBackTitle: t('machine.back'),
+                    headerTransparent: Platform.OS === 'ios',
+                    headerStyle: {
+                        backgroundColor: theme.colors.groupped.background,
+                    },
                 }}
             />
             <Stack.Screen
@@ -115,6 +143,16 @@ export default function RootLayout() {
                 }}
             />
             <Stack.Screen
+                name="session/[id]/changes"
+                options={{
+                    headerShown: true,
+                    header: createPlainHeader,
+                    headerTitle: t('sessionInfo.viewChanges'),
+                    headerTitleAlign: 'center',
+                    headerBackTitle: t('common.back'),
+                }}
+            />
+            <Stack.Screen
                 name="settings/account"
                 options={{
                     headerTitle: t('settings.account'),
@@ -129,13 +167,7 @@ export default function RootLayout() {
             <Stack.Screen
                 name="settings/agents"
                 options={{
-                    headerTitle: 'Agent Defaults',
-                }}
-            />
-            <Stack.Screen
-                name="settings/features"
-                options={{
-                    headerTitle: t('settings.features'),
+                    headerTitle: 'Agents',
                 }}
             />
             <Stack.Screen
@@ -151,10 +183,29 @@ export default function RootLayout() {
                 }}
             />
             <Stack.Screen
+                name="onboarding/settings"
+                options={{
+                    headerShown: true,
+                    headerTitle: t('onboarding.settingsTitle'),
+                    headerTitleAlign: 'center',
+                    headerBackTitle: t('common.back'),
+                }}
+            />
+            <Stack.Screen
+                name="troubleshoot"
+                options={{
+                    headerShown: true,
+                    headerTitle: t('troubleshoot.title'),
+                    headerTitleAlign: 'center',
+                    headerBackTitle: t('common.back'),
+                }}
+            />
+            <Stack.Screen
                 name="restore/index"
                 options={{
                     headerShown: true,
-                    headerTitle: t('navigation.linkNewDevice'),
+                    headerTitle: t('onboarding.restoreTitle'),
+                    headerTitleAlign: 'center',
                     headerBackTitle: t('common.back'),
                 }}
             />
@@ -162,7 +213,8 @@ export default function RootLayout() {
                 name="restore/manual"
                 options={{
                     headerShown: true,
-                    headerTitle: t('navigation.restoreWithSecretKey'),
+                    headerTitle: t('onboarding.secretKeyTitle'),
+                    headerTitleAlign: 'center',
                     headerBackTitle: t('common.back'),
                 }}
             />
@@ -170,8 +222,34 @@ export default function RootLayout() {
                 name="changelog"
                 options={{
                     headerShown: true,
-                    headerTitle: t('navigation.whatsNew'),
+                    header: createPlainHeader,
+                    headerTitle: () => (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text
+                                numberOfLines={1}
+                                style={[
+                                    {
+                                        fontSize: isDesktop ? 17 : 16,
+                                        fontWeight: '600',
+                                        color: theme.colors.header.tint,
+                                    },
+                                    Typography.default('semiBold'),
+                                ]}
+                            >
+                                {t('navigation.whatsNew')}
+                            </Text>
+                            <Image
+                                source={require('@/changelog/images/mouse-on-the-phone.webp')}
+                                style={{ width: 40, height: 40 }}
+                                resizeMode="contain"
+                            />
+                        </View>
+                    ),
                     headerBackTitle: t('common.back'),
+                    headerTransparent: Platform.OS === 'ios',
+                    headerStyle: {
+                        backgroundColor: theme.colors.groupped.background,
+                    },
                 }}
             />
             <Stack.Screen
@@ -284,6 +362,12 @@ export default function RootLayout() {
                 }}
             />
             <Stack.Screen
+                name="dev/diff-bench"
+                options={{
+                    headerTitle: 'Diff Benchmark',
+                }}
+            />
+            <Stack.Screen
                 name="dev/shimmer-demo"
                 options={{
                     headerTitle: 'Shimmer View Demo',
@@ -305,6 +389,12 @@ export default function RootLayout() {
                 name="dev/rig-preview"
                 options={{
                     headerTitle: 'Rig Preview',
+                }}
+            />
+            <Stack.Screen
+                name="dev/project-home"
+                options={{
+                    headerTitle: 'Project Home',
                 }}
             />
             <Stack.Screen

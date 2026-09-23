@@ -5,16 +5,27 @@ export type NativeSettingsMenuOption = {
     key: string;
     label: string;
     disabled?: boolean;
+    /** Icon for the row while it is not the selected one (iOS only). */
+    systemImage?: string;
 };
 
 export type NativeSettingsMenuGroup = {
     key: string;
     /** The current value, shown on the trigger. */
     label: string;
-    /** What is being chosen, shown as the heading above the options. */
+    /**
+     * What is being chosen, shown as the heading above the options. An empty
+     * string renders the options with no heading at all — the shape of a plain
+     * action row rather than a choice.
+     */
     title?: string;
     systemImage?: string;
     options: NativeSettingsMenuOption[];
+    /**
+     * The chosen option. `null` means the rows are actions rather than a
+     * choice — nothing is ever check-marked and the rows keep their own icons.
+     * `undefined` is a choice with nothing chosen yet.
+     */
     selectedKey: string | null | undefined;
     onSelect: (key: string) => void;
 };
@@ -24,6 +35,8 @@ export type NativeSettingsMenuProps = {
     children: React.ReactNode;
     style?: StyleProp<ViewStyle>;
     accessibilityLabel?: string;
+    /** Called as the native trigger begins handling a touch. */
+    onMenuOpen?: () => void;
     /** Render all options directly in the root menu without native section headers. */
     flat?: boolean;
     /**
@@ -37,6 +50,13 @@ export type NativeSettingsMenuProps = {
     triggerLabel?: string;
     triggerSystemImage?: string;
     triggerAlignment?: 'leading' | 'trailing' | 'center';
+    /**
+     * Which screen edge the trigger sits at. Menus anchored at the bottom open
+     * upward, where iOS lays items out bottom-up and the list must be
+     * pre-reversed (see nativeMenuOrder.ts); menus from the top open downward
+     * and keep their natural order.
+     */
+    anchor?: 'bottom' | 'top';
 };
 
 const NativeSettingsMenuImpl = Platform.select<React.ComponentType<NativeSettingsMenuProps>>({

@@ -1,15 +1,25 @@
 import React, { useState } from 'react';
 import { View, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { Text } from '@/components/StyledText';
 import { Typography } from '@/constants/Typography';
+import { Item } from '@/components/Item';
 import { ItemGroup } from '@/components/ItemGroup';
 import { ItemList } from '@/components/ItemList';
 import { RoundButton } from '@/components/RoundButton';
+import { Switch } from '@/components/Switch';
 import { Modal } from '@/modal';
 import { layout } from '@/components/layout';
 import { t } from '@/text';
-import { getServerUrl, setServerUrl, validateServerUrl, getServerInfo } from '@/sync/serverConfig';
+import {
+    getServerUrl,
+    setServerUrl,
+    validateServerUrl,
+    getServerInfo,
+    setUseCustomServerForVoice,
+    shouldUseCustomServerForVoice,
+} from '@/sync/serverConfig';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 
 const stylesheet = StyleSheet.create((theme) => ({
@@ -36,12 +46,14 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginBottom: 8,
     },
     textInput: {
-        backgroundColor: Platform.select({ web: theme.colors.input.background, default: theme.colors.glass.backgroundSubtle }),
-        padding: 12,
-        borderRadius: 8,
+        backgroundColor: Platform.select({ web: theme.colors.input.background, default: theme.colors.surfaceHigh }),
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        minHeight: 44,
+        borderRadius: 10,
         marginBottom: 8,
         ...Typography.mono(),
-        fontSize: 14,
+        fontSize: 15,
         color: theme.colors.input.text,
     },
     textInputValidating: {
@@ -59,13 +71,10 @@ const stylesheet = StyleSheet.create((theme) => ({
         color: theme.colors.status.connecting,
         marginBottom: 12,
     },
-    buttonRow: {
-        flexDirection: 'row',
-        gap: 12,
+    buttonColumn: {
+        gap: 4,
+        marginTop: 4,
         marginBottom: 12,
-    },
-    buttonWrapper: {
-        flex: 1,
     },
     statusText: {
         ...Typography.default(),
@@ -81,6 +90,8 @@ export default function ServerConfigScreen() {
     const router = useRouter();
     const serverInfo = getServerInfo();
     const [inputUrl, setInputUrl] = useState(serverInfo.isCustom ? getServerUrl() : '');
+    const [isCustomServer, setIsCustomServer] = useState(serverInfo.isCustom);
+    const [useCustomServerForVoice, setUseCustomServerForVoiceState] = useState(shouldUseCustomServerForVoice());
     const [error, setError] = useState<string | null>(null);
     const [isValidating, setIsValidating] = useState(false);
 
@@ -142,6 +153,12 @@ export default function ServerConfigScreen() {
 
         if (confirmed) {
             setServerUrl(inputUrl);
+            const nextIsCustomServer = getServerInfo().isCustom;
+            setIsCustomServer(nextIsCustomServer);
+            if (!nextIsCustomServer) {
+                setUseCustomServerForVoice(false);
+                setUseCustomServerForVoiceState(false);
+            }
         }
     };
 
@@ -154,8 +171,16 @@ export default function ServerConfigScreen() {
 
         if (confirmed) {
             setServerUrl(null);
+            setUseCustomServerForVoice(false);
             setInputUrl('');
+            setIsCustomServer(getServerInfo().isCustom);
+            setUseCustomServerForVoiceState(false);
         }
+    };
+
+    const handleUseCustomServerForVoice = (enabled: boolean) => {
+        setUseCustomServerForVoice(enabled);
+        setUseCustomServerForVoiceState(enabled);
     };
 
     return (
@@ -163,7 +188,8 @@ export default function ServerConfigScreen() {
             <Stack.Screen
                 options={{
                     headerShown: true,
-                    headerTitle: t('server.serverConfiguration'),
+                    headerTitle: t('server.title'),
+                    headerTitleAlign: 'center',
                     headerBackTitle: t('common.back'),
                 }}
             />
@@ -173,9 +199,9 @@ export default function ServerConfigScreen() {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             >
                 <ItemList style={styles.itemListContainer}>
-                    <ItemGroup footer={t('server.advancedFeatureFooter')}>
+                    <ItemGroup footer={t('server.selfHostFooter')}>
                         <View style={styles.contentContainer}>
-                            <Text style={styles.labelText}>{t('server.customServerUrlLabel').toUpperCase()}</Text>
+                            <Text style={styles.labelText}>{t('server.serverUrlLabel').toUpperCase()}</Text>
                             <TextInput
                                 style={[
                                     styles.textInput,
@@ -203,31 +229,51 @@ export default function ServerConfigScreen() {
                                     {t('server.validatingServer')}
                                 </Text>
                             )}
-                            <View style={styles.buttonRow}>
-                                <View style={styles.buttonWrapper}>
+                            <View style={styles.buttonColumn}>
+                                <RoundButton
+                                    title={isValidating ? t('server.validating') : t('common.save')}
+                                    size="normal"
+                                    action={handleSave}
+                                    disabled={isValidating}
+                                />
+                                {isCustomServer && (
                                     <RoundButton
                                         title={t('server.resetToDefault')}
                                         size="normal"
                                         display="inverted"
                                         onPress={handleReset}
                                     />
-                                </View>
-                                <View style={styles.buttonWrapper}>
-                                    <RoundButton
-                                        title={isValidating ? t('server.validating') : t('common.save')}
-                                        size="normal"
-                                        action={handleSave}
-                                        disabled={isValidating}
-                                    />
-                                </View>
+                                )}
                             </View>
-                            {serverInfo.isCustom && (
+                            {isCustomServer && (
                                 <Text style={styles.statusText}>
                                     {t('server.currentlyUsingCustomServer')}
                                 </Text>
                             )}
                         </View>
                     </ItemGroup>
+
+                    {isCustomServer && (
+                        <ItemGroup
+                            title={t('server.services')}
+                            footer={t('server.customServerVoiceFooter')}
+                        >
+                            <Item
+                                title={t('server.useCustomServerForVoice')}
+                                subtitle={useCustomServerForVoice
+                                    ? t('server.customServerVoiceEnabled')
+                                    : t('server.customServerVoiceDisabled')}
+                                icon={<Ionicons name="mic-outline" size={29} color="#34C759" />}
+                                rightElement={
+                                    <Switch
+                                        value={useCustomServerForVoice}
+                                        onValueChange={handleUseCustomServerForVoice}
+                                    />
+                                }
+                                showChevron={false}
+                            />
+                        </ItemGroup>
+                    )}
 
                     </ItemList>
             </KeyboardAvoidingView>

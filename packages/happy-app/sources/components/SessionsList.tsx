@@ -361,11 +361,13 @@ export function SessionsList({
     bottomContentInset = 128,
     onScroll,
     searchQuery = '',
+    scrollIndicatorTopInset = 0,
 }: {
     topContentInset?: number;
     bottomContentInset?: number;
     onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
     searchQuery?: string;
+    scrollIndicatorTopInset?: number;
 } = {}) {
     const styles = stylesheet;
     const safeArea = useSafeAreaInsets();
@@ -478,6 +480,7 @@ export function SessionsList({
             case 'projects-header': return `projects-header-${item.source}`;
             case 'project': return `project-${item.project.id}`;
             case 'session': return `session-${item.session.id}`;
+            default: return `item-${index}`;
         }
     }, []);
 
@@ -548,6 +551,8 @@ export function SessionsList({
                         isSingle={isSingle}
                     />
                 );
+            default:
+                return null;
         }
     }, [selectedSessionId, data]);
 
@@ -584,6 +589,8 @@ export function SessionsList({
                     maxToRenderPerBatch={8}
                     initialNumToRender={12}
                     onScroll={onScroll}
+                    automaticallyAdjustsScrollIndicatorInsets={scrollIndicatorTopInset === 0}
+                    scrollIndicatorInsets={scrollIndicatorTopInset > 0 ? { top: scrollIndicatorTopInset } : undefined}
                     scrollEventThrottle={16}
                 />
             </View>
@@ -596,6 +603,7 @@ const STATUS_CONFIG: Record<SessionState, { color: string; dotColor: string; isP
     thinking: { color: '#007AFF', dotColor: '#007AFF', isPulsing: true, isConnected: true },
     waiting: { color: '#34C759', dotColor: '#34C759', isPulsing: false, isConnected: true },
     permission_required: { color: '#FF9500', dotColor: '#FF9500', isPulsing: true, isConnected: true },
+    input_required: { color: '#FF9500', dotColor: '#FF9500', isPulsing: true, isConnected: true },
 };
 
 const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }: {

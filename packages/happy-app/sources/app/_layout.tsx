@@ -14,7 +14,7 @@ import { initialWindowMetrics, SafeAreaProvider, useSafeAreaInsets } from 'react
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SidebarNavigator } from '@/components/SidebarNavigator';
 import sodium from '@/encryption/libsodium.lib';
-import { View, Platform, AppState } from 'react-native';
+import { View, Platform, AppState, LogBox } from 'react-native';
 import { ModalProvider } from '@/modal';
 import { PostHogProvider } from 'posthog-react-native';
 import { tracking } from '@/track/tracking';
@@ -27,6 +27,7 @@ import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts/Keyboar
 import { StatusBarProvider } from '@/components/StatusBarProvider';
 // import * as SystemUI from 'expo-system-ui';
 import { initConsoleLogging, setConsoleOutputEnabled } from '@/utils/consoleLogging';
+import { loadAppConfig } from '@/sync/appConfig';
 import { useLocalSetting } from '@/sync/storage';
 import { useUnistyles } from 'react-native-unistyles';
 import { AsyncLock } from '@/utils/lock';
@@ -37,6 +38,13 @@ import { useTauriZoom } from '@/hooks/useTauriZoom';
 import { useTauriDrag } from '@/hooks/useTauriDrag';
 import { BrowserNavigationShortcuts } from '@/hooks/useBrowserNavigationShortcuts';
 import { AndroidChatHeadBridge } from '@/components/AndroidChatHeadBridge';
+import { getServerUrl } from '@/sync/serverConfig';
+
+// The RevenueCat SDK logs its failures through console.error, which LogBox
+// turns into a red error overlay. Dev builds have no App Store products, so
+// "Error fetching offerings" fires on every launch; purchases are optional
+// and the failure is already handled in syncPurchases.
+LogBox.ignoreLogs([/\[RevenueCat\]/]);
 
 // Configure notification handler — suppress push display when app is in foreground
 Notifications.setNotificationHandler({
@@ -176,16 +184,48 @@ async function loadFonts() {
     });
 }
 
+function isHarnessDevStartup(): boolean {
+    return __DEV__ && process.env.EXPO_PUBLIC_HARNESS_MODE === '1';
+}
+
+function hasHarnessDevCredentials(): boolean {
+    return __DEV__ && Boolean(
+        process.env.EXPO_PUBLIC_HARNESS_DEV_TOKEN
+        || process.env.EXPO_PUBLIC_HARNESS_DEV_SECRET,
+    );
+}
+
+function assertLoopbackHarnessServer(): void {
+    const configuredUrl = getServerUrl();
+    let parsed: URL;
+    try {
+        parsed = new URL(configuredUrl);
+    } catch {
+        throw new Error('Harness startup requires a valid loopback server URL.');
+    }
+    if (parsed.protocol !== 'http:' || !['localhost', '127.0.0.1', '::1', '[::1]'].includes(parsed.hostname)
+        || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
+        throw new Error('Harness startup refuses a non-loopback server URL.');
+    }
+}
+
 function getDevEnvironmentCredentials(): AuthCredentials | null {
     if (!__DEV__) {
         return null;
     }
 
-    const token = process.env.EXPO_PUBLIC_DEV_TOKEN;
-    const secret = process.env.EXPO_PUBLIC_DEV_SECRET;
+    const harnessMode = isHarnessDevStartup();
+    const token = harnessMode
+        ? process.env.EXPO_PUBLIC_HARNESS_DEV_TOKEN
+        : process.env.EXPO_PUBLIC_DEV_TOKEN;
+    const secret = harnessMode
+        ? process.env.EXPO_PUBLIC_HARNESS_DEV_SECRET
+        : process.env.EXPO_PUBLIC_DEV_SECRET;
     if (!token || !secret) {
         return null;
     }
+
+    if (harnessMode) assertLoopbackHarnessServer();
 
     return { token, secret };
 }
@@ -194,6 +234,10 @@ function getDevWebQueryCredentials(): AuthCredentials | null {
     if (!__DEV__ || Platform.OS !== 'web' || typeof window === 'undefined') {
         return null;
     }
+
+    // The harness accepts credentials only from its command-scoped
+    // Metro environment, never from a URL that could be copied or logged.
+    if (isHarnessDevStartup()) return null;
 
     const params = new URLSearchParams(window.location.search);
     const token = params.get('dev_token');
@@ -241,6 +285,18 @@ export default function RootLayout() {
 
                 let credentials = await TokenStorage.getCredentials();
                 const devCredentials = getDevWebQueryCredentials() ?? getDevEnvironmentCredentials();
+
+                if (hasHarnessDevCredentials() && !isHarnessDevStartup()) {
+                    await TokenStorage.removeCredentials();
+                    throw new Error('Harness credentials require the debug harness startup flag.');
+                }
+
+                // A harness bundle must never silently reuse a persisted account
+                // when its command-scoped auth variables are absent.
+                if (isHarnessDevStartup() && !devCredentials) {
+                    await TokenStorage.removeCredentials();
+                    throw new Error('Harness startup did not provide debug credentials.');
+                }
 
                 if (devCredentials) {
                     const credentialsChanged = credentials?.token !== devCredentials.token
@@ -361,12 +417,15 @@ export default function RootLayout() {
     // Track the screens
     useTrackScreens()
 
-    // Sync console output toggle from Dev screen
+    // Sync console output toggle from Dev screen. Same precedence as
+    // initConsoleLogging: user setting OR build-variant default — otherwise
+    // the untouched (false) setting silently mutes console.log in dev builds
+    // the moment this layout mounts.
     const consoleLoggingEnabled = useLocalSetting('consoleLoggingEnabled');
     const devModeEnabled = __DEV__ || useLocalSetting('devModeEnabled');
     const voiceUpsellOverride = useLocalSetting('voiceUpsellOverride');
     React.useEffect(() => {
-        setConsoleOutputEnabled(consoleLoggingEnabled);
+        setConsoleOutputEnabled(consoleLoggingEnabled || (loadAppConfig().consoleLoggingDefault ?? false));
     }, [consoleLoggingEnabled]);
 
     React.useEffect(() => {

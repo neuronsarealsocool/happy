@@ -42,6 +42,7 @@ interface MultiTextInputProps {
     defaultValue?: string;
     onChangeText?: (text: string) => void;
     placeholder?: string;
+    editable?: boolean;
     maxHeight?: number;
     lineHeight?: number;
     paddingTop?: number;
@@ -59,6 +60,7 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
         defaultValue,
         onChangeText,
         placeholder,
+        editable = true,
         maxHeight = 120,
         lineHeight = MULTI_TEXT_INPUT_LINE_HEIGHT,
         onKeyPress,
@@ -208,7 +210,14 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
                     paddingBottom: props.paddingBottom,
                     paddingLeft: props.paddingLeft,
                     paddingRight: props.paddingRight,
+                    opacity: editable ? 1 : 0.58,
+                    // Read-only rather than disabled: a disabled textarea is
+                    // skipped by the caret but still greys its own text, and the
+                    // opacity above already says the field is out of reach.
+                    pointerEvents: editable ? undefined : ('none' as const),
                 }}
+                readOnly={!editable}
+                tabIndex={editable ? undefined : -1}
                 placeholder={placeholder}
                 {...(isControlled ? { value } : { defaultValue })}
                 onChange={handleChange}

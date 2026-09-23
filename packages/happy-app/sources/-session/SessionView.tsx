@@ -19,7 +19,6 @@ import { ChatHeaderView } from '@/components/ChatHeaderView';
 import { ChatList } from '@/components/ChatList';
 import { Deferred } from '@/components/Deferred';
 import { EmptyMessages } from '@/components/EmptyMessages';
-import { SessionStatusBar } from '@/components/SessionStatusBar';
 import { SessionProfilePictureAvatar } from '@/components/SessionProfilePictureAvatar';
 import { VoiceAssistantStatusBar } from '@/components/VoiceAssistantStatusBar';
 import { useDraft } from '@/hooks/useDraft';
@@ -28,8 +27,8 @@ import { Modal } from '@/modal';
 import { voiceHooks } from '@/realtime/hooks/voiceHooks';
 import { getCurrentVoiceConversationId, getCurrentVoiceSessionDurationSeconds, startRealtimeSession, stopRealtimeSession } from '@/realtime/RealtimeSession';
 import { gitStatusSync } from '@/sync/gitStatusSync';
-import { sessionAbort, sessionGoalAction, sessionSetAgentModes, spawnSideChat, sessionKill, sessionArchive } from '@/sync/ops';
-import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionGitStatus, useSessionMessages, useSessionUsage, useSetting, useSideChatSessions } from '@/sync/storage';
+import { sessionAbort, sessionCancelCommunication, sessionGoalAction, sessionSetAgentModes, spawnSideChat, sessionKill, sessionArchive } from '@/sync/ops';
+import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionMessages, useSessionPendingCommunications, useSessionUsage, useSetting, useSideChatSessions } from '@/sync/storage';
 import { useSession } from '@/sync/storage';
 import { getSessionForkSource } from '@/utils/sessionFork';
 import { useSessionProfilePicture } from '@/utils/sessionProfilePictures';
@@ -43,12 +42,10 @@ import { tracking } from '@/track';
 import { getVoiceMessageCount, getVoiceOnboardingPromptLoadCount } from '@/sync/persistence';
 import { isRunningOnMac } from '@/utils/platform';
 import { useDeviceType, useHeaderHeight, useIsLandscape, useIsTablet } from '@/utils/responsive';
-import { resolveStatusBarGitBranch } from '@/utils/sessionStatusBar';
 import { FilesSidebar, SidebarMode } from '@/components/FilesSidebar';
 import { PreviewPane } from '@/components/PreviewPane';
 import { AllFilesDiffView } from '@/components/AllFilesDiffView';
 import { FileViewPanel } from '@/components/FileViewPanel';
-import { prefetchPierreDiff } from '@/components/diff/PierreDiffView';
 import { GitFileStatus } from '@/sync/gitStatusFiles';
 import { useOverlayNav } from '@/-session/sessionOverlayNav';
 import { useSessionPreviewStore } from '@/-session/sessionPreviewStore';
@@ -75,6 +72,7 @@ import {
     getRigIdentity,
     getRigReasoningSelection,
     isRigMetadata,
+    isRigMetadataV1,
     isRigModelSelectionEnabled,
     isRigPermissionSelectionEnabled,
     isRigReasoningSelectionEnabled,
@@ -380,11 +378,6 @@ export const SessionView = React.memo((props: { id: string }) => {
         });
         return () => useOverlayNav.getState().reset();
     }, [canOverlayBack, canOverlayForward]);
-
-    // Warm Pierre's lazy web chunks while the user is still reading chat.
-    React.useEffect(() => {
-        prefetchPierreDiff();
-    }, []);
 
     // Compute header props based on session state
     const headerProps = useMemo(() => {
@@ -868,11 +861,13 @@ const ChatComposer = React.memo(function ChatComposer(props: ChatComposerProps) 
 export function SessionViewLoaded({
     sessionId,
     session,
+    active = true,
     embedded = false,
     onHeaderBackdropVisibilityChange,
 }: {
     sessionId: string;
     session: Session;
+    active?: boolean;
     embedded?: boolean;
     onHeaderBackdropVisibilityChange?: (visible: boolean) => void;
 }) {
@@ -1006,9 +1001,7 @@ export function SessionViewLoaded({
 
     const sessionStatus = useSessionStatus(session);
     const sessionUsage = useSessionUsage(sessionId);
-    const gitStatus = useSessionGitStatus(sessionId);
     const alwaysShowContextSize = useSetting('alwaysShowContextSize');
-    const sessionStatusBarDisplay = useSetting('sessionStatusBarDisplay');
     const experiments = useSetting('experiments');
     const expResumeSession = useSetting('expResumeSession');
     const { canResume, resumeSession, resumingSession } = useSessionQuickActions(session);
@@ -1016,9 +1009,8 @@ export function SessionViewLoaded({
     const resumeCommandBlock = getResumeCommandBlock(session);
     const attemptedAutoResumeRef = React.useRef<string | null>(null);
 
-    // Existing conversations always expose attachments in this fork.
-    const expImageUpload = true;
     const { selectedImages, pickFiles, removeImage, clearImages, addImages } = useImagePicker();
+    const pendingCommunications = useSessionPendingCommunications(sessionId);
     const canUseAttachments = rigCanUseAttachments(session.metadata);
     React.useEffect(() => {
         if (!canUseAttachments && selectedImages.length > 0) {
@@ -1031,6 +1023,12 @@ export function SessionViewLoaded({
     // clear it without subscribing to it (which would re-render the whole
     // SessionViewLoaded tree on every keystroke).
     const composerHandleRef = React.useRef<ChatComposerHandle | null>(null);
+    const sendingSessionsRef = React.useRef(new Set<string>());
+    const currentSessionIdRef = React.useRef<string | null>(sessionId);
+    React.useEffect(() => {
+        currentSessionIdRef.current = sessionId;
+        return () => { currentSessionIdRef.current = null; };
+    }, [sessionId]);
 
     // Handle dismissing CLI version warning
     const handleDismissCliWarning = React.useCallback(() => {
@@ -1077,14 +1075,50 @@ export function SessionViewLoaded({
     // handleSend reads the live message via the composer ref, so it doesn't
     // need to re-create on every keystroke.
     const handleSend = React.useCallback(() => {
-        const liveMessage = composerHandleRef.current?.getMessage() ?? '';
-        if (liveMessage.trim() || (expImageUpload && selectedImages.length > 0)) {
-            const attachments = expImageUpload ? selectedImages : undefined;
-            composerHandleRef.current?.clearMessage();
-            if (expImageUpload) clearImages();
-            sync.sendMessage(sessionId, liveMessage, { source: 'chat', attachments });
+        if (sendingSessionsRef.current.has(sessionId)) return;
+        const composer = composerHandleRef.current;
+        const liveMessage = composer?.getMessage() ?? '';
+        const draftUpdatedAt = storage.getState().sessions[sessionId]?.draftUpdatedAt;
+        if (liveMessage.trim() || selectedImages.length > 0) {
+            const attachments = selectedImages.length > 0 ? selectedImages : undefined;
+            const communicationsToDismiss = [...pendingCommunications];
+            sendingSessionsRef.current.add(sessionId);
+
+            void (async () => {
+                try {
+                    const accepted = await sync.sendMessage(sessionId, liveMessage, {
+                        source: 'chat',
+                        attachments,
+                        awaitDelivery: communicationsToDismiss.length > 0,
+                        onAccepted: () => {
+                            if (currentSessionIdRef.current === sessionId) {
+                                const latest = storage.getState().sessions[sessionId];
+                                const unchanged = !isRigMetadataV1(latest?.metadata)
+                                    || latest?.draft == null || latest.draftUpdatedAt === draftUpdatedAt;
+                                if (unchanged && composerHandleRef.current === composer && composer?.getMessage() === liveMessage) {
+                                    composer.clearMessage();
+                                }
+                                for (const attachment of attachments ?? []) removeImage(attachment.id);
+                            }
+                        },
+                    });
+                    if (!accepted) return;
+                    const dismissals = await Promise.allSettled(communicationsToDismiss.map((communication) => (
+                        sessionCancelCommunication(sessionId, communication.id, communication.kind)
+                    )));
+                    for (const dismissal of dismissals) {
+                        if (dismissal.status === 'rejected') {
+                            console.error('Failed to dismiss an agent question:', dismissal.reason);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to send message while dismissing agent questions:', error);
+                } finally {
+                    sendingSessionsRef.current.delete(sessionId);
+                }
+            })();
         }
-    }, [sessionId, expImageUpload, selectedImages, clearImages]);
+    }, [sessionId, selectedImages, removeImage, pendingCommunications]);
 
     const handleAbort = React.useCallback(() => {
         // Mode picks live in synced metadata — clear them there, otherwise the
@@ -1122,16 +1156,6 @@ export function SessionViewLoaded({
             contextWindow: source.contextWindow,
         };
     }, [sessionUsage, session.latestUsage]);
-    const metadataGitBranch = React.useMemo(() => {
-        const gitBranch = (session.metadata as { gitBranch?: unknown } | null)?.gitBranch;
-        return typeof gitBranch === 'string' && gitBranch.trim() ? gitBranch.trim() : null;
-    }, [session.metadata]);
-    const statusBarGitBranch = resolveStatusBarGitBranch(gitStatus?.branch, metadataGitBranch);
-    const statusBarModelLabel = modelMode?.name ?? session.metadata?.currentModelCode ?? session.modelMode ?? null;
-    const statusBarEffortLabel = effortLevel?.name
-        ? effortLevel.name.charAt(0).toUpperCase() + effortLevel.name.slice(1)
-        : null;
-
     const visibleAgentGoal = React.useMemo(() => (
         resolveVisibleAgentGoalStatus(session)
     ), [
@@ -1286,9 +1310,7 @@ export function SessionViewLoaded({
             togglePreviewTarget(sessionId, latestPreviewTarget);
         });
         const unregisterAttach = registerShortcutHandler('composer.attach', () => {
-            if (expImageUpload) {
-                pickFiles();
-            }
+            pickFiles();
         });
         const unregisterStop = registerShortcutHandler('session.stop', () => {
             if ((sessionStatus.state === 'thinking' || sessionStatus.state === 'waiting') && !isDisconnected) {
@@ -1310,7 +1332,7 @@ export function SessionViewLoaded({
             unregisterStop();
             unregisterCopyLatest();
         };
-    }, [expImageUpload, handleAbort, isDisconnected, messages, pickFiles, registerShortcutHandler, session.metadata?.path, sessionId, sessionStatus.state, togglePreviewTarget]);
+    }, [handleAbort, isDisconnected, messages, pickFiles, registerShortcutHandler, session.metadata?.path, sessionId, sessionStatus.state, togglePreviewTarget]);
 
     React.useEffect(() => {
         if (!canResume || resumingSession || attemptedAutoResumeRef.current === sessionId) {
@@ -1382,20 +1404,17 @@ export function SessionViewLoaded({
                 ? sessionStatus.state === 'thinking' || sessionStatus.state === 'waiting'
                 : sessionStatus.state === 'thinking')}
             onFileViewerPress={experiments && !isTablet && rigCanBrowseFiles(session.metadata) && rigCanReadFiles(session.metadata) ? handleFileViewerPress : undefined}
-            selectedImages={expImageUpload && canUseAttachments ? selectedImages : undefined}
-            onPickImages={expImageUpload && canUseAttachments ? pickFiles : undefined}
-            onRemoveImage={expImageUpload && canUseAttachments ? removeImage : undefined}
-            onAddImages={expImageUpload && canUseAttachments ? addImages : undefined}
+            selectedImages={canUseAttachments ? selectedImages : undefined}
+            onPickImages={canUseAttachments ? pickFiles : undefined}
+            onRemoveImage={canUseAttachments ? removeImage : undefined}
+            onAddImages={canUseAttachments ? addImages : undefined}
             autocompletePrefixes={AGENT_INPUT_AUTOCOMPLETE_PREFIXES}
             autocompleteSuggestions={handleAutocompleteSuggestions}
             usageData={usageData}
             alwaysShowContextSize={alwaysShowContextSize}
             zenMode={zenMode}
-            showSessionStatusInfoInSettings={false}
             showStatusDetails={!usesFloatingMobileDock || isChatAtBottom}
-            sessionStatusGitBranch={statusBarGitBranch}
-            sessionStatusModelLabel={statusBarModelLabel}
-            sessionStatusEffortLabel={statusBarEffortLabel}
+            sessionStatusUsageLimits={session.agentState?.usageLimits}
         />
     );
 
@@ -1417,27 +1436,6 @@ export function SessionViewLoaded({
         </CenteredInputWidth>
     ) : null;
 
-    const showSessionStatusBar = sessionStatusBarDisplay === 'above' || sessionStatusBarDisplay === 'below';
-    const sessionStatusBarPosition = sessionStatusBarDisplay === 'above' ? 'above' : 'below';
-    const sessionStatusBar = showBottomDockDetails && showSessionStatusBar ? (
-        <CenteredInputWidth horizontalPadding={sessionInputHorizontalPadding}>
-            <SessionStatusBar
-                gitBranch={statusBarGitBranch}
-                modelLabel={statusBarModelLabel}
-                modelMode={modelMode}
-                availableModels={availableModels}
-                onModelModeChange={isRigModelSelectionEnabled(session.metadata) ? updateModelMode : undefined}
-                effortLabel={statusBarEffortLabel}
-                effortLevel={effortLevel}
-                availableEffortLevels={availableEffortLevels}
-                onEffortLevelChange={isRigReasoningSelectionEnabled(session.metadata) ? updateEffortLevel : undefined}
-                contextSize={usageData?.contextSize}
-                contextWindow={usageData?.contextWindow}
-                usageLimits={session.agentState?.usageLimits}
-            />
-        </CenteredInputWidth>
-    ) : null;
-
     const input = (
         <>
             {inactiveHint}
@@ -1453,10 +1451,8 @@ export function SessionViewLoaded({
             <CenteredInputWidth horizontalPadding={sessionInputHorizontalPadding}>
                 <AgentQuestionBanner sessionId={sessionId} />
             </CenteredInputWidth>
-            {sessionStatusBarPosition === 'above' ? sessionStatusBar : null}
             {showBottomDockDetails && <RigActivityBar metadata={session.metadata} />}
             {composer}
-            {sessionStatusBarPosition === 'below' ? sessionStatusBar : null}
         </>
     );
 

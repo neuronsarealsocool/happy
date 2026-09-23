@@ -5,8 +5,10 @@
         "cli": "pnpm --filter happy cli",
         "release": "node ./scripts/release.cjs",
         "web": "pnpm --filter happy-app web",
-        "codium": "pnpm --filter codium dev",
         "app-logs": "pnpm --filter happy-app-logs start",
+        "mobile-gym": "pnpm --filter happy-mobile-gym cli",
+        "screenshots:compose": "node scripts/app-store/compose.mjs",
+        "screenshots:capture:android": "node scripts/app-store/android-capture.mjs",
         "postinstall": "node ./scripts/postinstall.cjs",
         "env:new": "tsx environments/environments.ts new",
         "env:list": "tsx environments/environments.ts list",
@@ -33,7 +35,8 @@
             "packages/happy-server-self-host",
             "packages/happy-wire",
             "packages/happy-app-logs",
-            "packages/codium"
+            "packages/happy-mobile-gym",
+            "packages/expo-tailcat"
         ]
     },
     "pnpm": {
@@ -49,12 +52,15 @@
             "@shopify/react-native-skia",
             "@tailwindcss/oxide",
             "better-sqlite3",
-            "electron",
             "esbuild",
-            "node-pty",
             "prisma",
             "sharp"
         ]
+    },
+    "devDependencies": {
+        "playwright": "1.61.1",
+        "sharp": "^0.35.3",
+        "tsx": "^4.20.6"
     },
     "packageManager": "pnpm@10.11.0"
 }

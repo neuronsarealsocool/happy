@@ -20,7 +20,9 @@ type HappyChatHeadsModule = {
     removeListeners: (count: number) => void;
 };
 
-const nativeModule = NativeModules.HappyChatHeads as HappyChatHeadsModule | undefined;
+const nativeModule = Platform.OS === 'android'
+    ? NativeModules.HappyChatHeads as HappyChatHeadsModule | undefined
+    : undefined;
 const nativeEvents = Platform.OS === 'android' && nativeModule
     ? new NativeEventEmitter(nativeModule)
     : null;

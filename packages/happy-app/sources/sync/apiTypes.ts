@@ -3,18 +3,18 @@ import {
     ApiMessageSchema,
     ApiUpdateMachineStateSchema,
     ApiUpdateNewMessageSchema,
-    ApiUpdateSessionStateSchema,
+    ApiUpdateSessionStateSchema as SharedApiUpdateSessionStateSchema,
     type ApiMessage,
 } from '@slopus/happy-wire';
 import { GitHubProfileSchema, ImageRefSchema } from './profile';
 import { RelationshipStatusSchema, UserProfileSchema } from './friendTypes';
 import { FeedBodySchema } from './feedTypes';
+import { sessionAvatarDescriptorSchema, sessionAvatarRevisionSchema } from './sessionAvatarTypes';
 
 export {
     ApiMessageSchema,
     ApiUpdateMachineStateSchema,
     ApiUpdateNewMessageSchema,
-    ApiUpdateSessionStateSchema,
 };
 export type { ApiMessage };
 
@@ -25,8 +25,19 @@ export type { ApiMessage };
 export const ApiUpdateNewSessionSchema = z.object({
     t: z.literal('new-session'),
     id: z.string(), // Session ID
+    avatar: sessionAvatarDescriptorSchema.nullable().optional().catch(undefined),
+    avatarVersion: sessionAvatarRevisionSchema.optional().catch(undefined),
+    projectId: z.string().nullable().optional(),
     createdAt: z.number(),
     updatedAt: z.number(),
+});
+
+// The shared wire schema predates the account-scoped project link. Extend it
+// here so Zod does not strip projectId before Sync can apply it.
+export const ApiUpdateSessionStateSchema = SharedApiUpdateSessionStateSchema.extend({
+    avatar: sessionAvatarDescriptorSchema.nullable().optional().catch(undefined),
+    avatarVersion: sessionAvatarRevisionSchema.optional().catch(undefined),
+    projectId: z.string().nullable().optional(),
 });
 
 export const ApiDeleteSessionSchema = z.object({
@@ -37,6 +48,21 @@ export const ApiDeleteSessionSchema = z.object({
 export const ApiDeleteMachineSchema = z.object({
     t: z.literal('delete-machine'),
     machineId: z.string(),
+});
+
+export const ApiNewProjectSchema = z.object({
+    t: z.literal('new-project'),
+    projectId: z.string(),
+});
+
+export const ApiUpdateProjectSchema = z.object({
+    t: z.literal('update-project'),
+    projectId: z.string(),
+});
+
+export const ApiDeleteProjectSchema = z.object({
+    t: z.literal('delete-project'),
+    projectId: z.string(),
 });
 
 // Machine creation. Carries the per-machine data encryption key so an
@@ -149,6 +175,9 @@ export const ApiUpdateSchema = z.union([
     ApiUpdateMachineStateSchema,
     ApiUpdateNewMachineSchema,
     ApiDeleteMachineSchema,
+    ApiNewProjectSchema,
+    ApiUpdateProjectSchema,
+    ApiDeleteProjectSchema,
     ApiNewArtifactSchema,
     ApiUpdateArtifactSchema,
     ApiDeleteArtifactSchema,

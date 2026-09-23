@@ -171,7 +171,10 @@ export const PreviewPane = React.memo(function PreviewPane({
                                 <NativeOptionsPicker
                                     title="Preview device"
                                     triggerLabel={mobileDevice.name}
-                                    options={MOBILE_DEVICES.map((device) => ({ key: device.id, label: `${device.name} (${device.width} x ${device.height})` }))}
+                                    sections={[{
+                                        key: 'devices',
+                                        options: MOBILE_DEVICES.map((device) => ({ key: device.id, label: `${device.name} (${device.width} x ${device.height})` })),
+                                    }]}
                                     selectedKey={mobileDevice.id}
                                     onSelect={(key) => setMobileDeviceId(key as MobileDeviceId)}
                                 >

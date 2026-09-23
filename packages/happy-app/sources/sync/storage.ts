@@ -1,30 +1,30 @@
 import { create } from "zustand";
+import { messagePlanMode } from './messagePlanMode';
 import { useShallow } from 'zustand/react/shallow'
 import equal from 'fast-deep-equal'
-
-function useDeepEqual<T>(selector: (state: StorageState) => T): (state: StorageState) => T {
-    const prev = React.useRef<T>(undefined);
-    return (state: StorageState) => {
-        const next = selector(state);
-        return equal(prev.current, next) ? prev.current! : (prev.current = next);
-    };
-}
-import { Session, Machine, GitStatus, SessionAgentModesPatch } from "./storageTypes";
+import { useDeepEqual } from './storeSelectors';
+import { Session, Machine, GitStatus, SessionAgentModesPatch, SessionComposerPatch } from "./storageTypes";
 import type { GitStatusFiles } from "./gitStatusFiles";
 import type { ProjectFilesList } from "./projectFiles";
 import { buildPathProjectGroups, buildProjectGroups, isProjectSession, type ProjectGroupData } from "./projectGroups";
-import { selectPendingCommunications, type PendingAgentCommunication } from "./agentCommunications";
-import { createReducer, reducer, ReducerState } from "./reducer/reducer";
-import { Message } from "./typesMessage";
+import {
+    selectAgentFormCommunication,
+    selectPendingCommunications,
+    type PendingAgentCommunication,
+} from "./agentCommunications";
+import { createReducer, reducer, ReducerState, registerUserMessageServerIds } from "./reducer/reducer";
+import { Message, messageSortKey } from "./typesMessage";
 import { NormalizedMessage } from "./typesRaw";
 import { isMachineOnline } from '@/utils/machineUtils';
-import { getSessionName, getSessionSubtitle, getSessionAvatarId, type SessionState } from '@/utils/sessionUtils';
+import { getSessionName, getSessionSubtitle, getSessionAvatarId } from '@/utils/sessionUtils';
+import { resolveSessionState, type SessionState } from './sessionState';
+import { getSessionActivityAt } from '@/utils/sessionActivity';
 import { applySettings, Settings } from "./settings";
 import { LocalSettings, applyLocalSettings } from "./localSettings";
 import { Purchases, customerInfoToPurchases } from "./purchases";
 import { Profile } from "./profile";
 import { UserProfile, RelationshipUpdatedEvent } from "./friendTypes";
-import { loadSettings, loadLocalSettings, saveLocalSettings, saveSettings, loadPurchases, savePurchases, loadProfile, saveProfile, loadSessionDrafts, saveSessionDrafts } from "./persistence";
+import { loadSettings, loadLocalSettings, saveLocalSettings, saveSettings, loadPurchases, savePurchases, loadProfile, saveProfile, loadSessionDrafts, saveSessionDrafts, loadRigComposerDraft, saveRigComposerDraft } from "./persistence";
 import { isAgentModePushPending } from "./agentModesPending";
 import { loadSessionLastMessageSentAt, saveSessionLastMessageSentAt } from "./persistence";
 import type { CustomerInfo } from './revenueCat/types';
@@ -34,8 +34,13 @@ import { getCurrentRealtimeSessionId, getVoiceSession } from '@/realtime/Realtim
 import { isMutableTool } from "@/components/tools/knownTools";
 import { DecryptedArtifact } from "./artifactTypes";
 import { FeedItem } from "./feedTypes";
-import { getRigActivityIndicators, getRigIdentity, isRigMetadata } from './rig';
+import { getRigActivityIndicators, getRigComposerState, getRigGitSummary, getRigIdentity, isRigMetadata, isRigMetadataV1, rigSendsMessageReceipts } from './rig';
+import { rigComposerFlushAheadSessions, rigComposerFlushPending } from './rigComposer';
 import { indexSessionsById } from './sessionIdentity';
+import { t } from '@/text';
+import type { Project } from './projectTypes';
+import { getSessionProjectId, isHappyAgentSession } from './projectTypes';
+import { resolveSessionAvatar } from './resolveSessionAvatar';
 
 // Debounce timer for realtimeMode changes
 let realtimeModeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -50,12 +55,60 @@ function resolveSessionOnlineState(session: { active: boolean; activeAt: number 
     return session.active ? "online" : session.activeAt;
 }
 
+/** Pending Happy Agent composer, including empty text and clears. lastMode is never stored. */
+function persistRigComposerDraft(session: Session): void {
+    if (!isRigMetadataV1(session.metadata)) return;
+    saveRigComposerDraft(session.id, session.draftUpdatedAt == null ? null : {
+        text: session.draft ?? null,
+        draftUpdatedAt: session.draftUpdatedAt,
+        permissionMode: session.permissionMode ?? null,
+        modelMode: session.modelMode ?? null,
+        effortLevel: session.effortLevel ?? null,
+        serviceTier: session.serviceTier ?? null,
+    });
+}
+
 /**
  * Checks if a session should be shown in the active sessions group
  */
 function isSessionActive(session: { active: boolean; activeAt: number }): boolean {
     // Use the active flag directly, no timeout checks
     return session.active;
+}
+
+/**
+ * A session the agent retired, or a Happy CLI session that has ended. Rig
+ * sessions that merely lost their connection are still live work.
+ *
+ * Archived sessions never sit inside a project card: they trail the list as
+ * flat, date-grouped rows, so revealing the archive appends to the bottom
+ * instead of reshaping the groups above it.
+ *
+ * A chat the user is in the middle of archiving counts as archived here. The
+ * machine has not agreed yet — that is several round trips away — but the
+ * answer is not what the press was about, and nothing else on this screen
+ * makes the user wait for one.
+ */
+function isSessionArchived(session: Session, archiving: ReadonlySet<string>): boolean {
+    return archiving.has(session.id)
+        || session.metadata?.lifecycleState === 'archived'
+        || (!isRigMetadata(session.metadata) && !session.active);
+}
+
+/** For the handful of reads that happen outside a rebuild. */
+const NO_SESSIONS_ARCHIVING: ReadonlySet<string> = new Set<string>();
+
+/** "Today", "Yesterday", or "N days ago" for a flat row's date heading. */
+function relativeDayTitle(timestamp: number): string {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const then = new Date(timestamp);
+    const day = new Date(then.getFullYear(), then.getMonth(), then.getDate());
+    // Rounded because a DST boundary makes a calendar day 23 or 25 hours long.
+    const diffDays = Math.round((today.getTime() - day.getTime()) / (24 * 60 * 60 * 1000));
+    if (diffDays <= 0) return t('sessionHistory.today');
+    if (diffDays === 1) return t('sessionHistory.yesterday');
+    return t('sessionHistory.daysAgo', { count: diffDays });
 }
 
 // Known entitlement IDs
@@ -81,6 +134,8 @@ interface SessionMessages {
 
 // Display-only row data — all primitives, cheap to deep-equal
 export interface SessionRowData {
+    botId?: string | null;
+    botUsername?: string | null;
     id: string;
     name: string;
     subtitle: string;
@@ -91,15 +146,33 @@ export interface SessionRowData {
     providerKind: string | null;
     modelName: string | null;
     activitySummary: string | null;
+    gitChangedFiles: number | null;
+    gitCountsExact: boolean;
+    gitDeletions: number | null;
+    gitInsertions: number | null;
+    // The branch the agent last reported for its checkout. Names a project's
+    // own checkout, which has no worktree name of its own.
+    gitBranch?: string | null;
     state: SessionState;
     // Only present on inactive sessions — active sessions never show "last seen"
     // and activeAt updates on every heartbeat, causing needless deep-equal diffs
     activeAt?: number;
-    createdAt?: number;
+    createdAt: number;
+    // Last meaningful message, falling back to this device's sent-message
+    // record and then creation — see getSessionActivityAt. Grouping the list by
+    // project loses the global ordering the sessions were sorted into, so the
+    // flat list re-sorts on these two keys instead.
+    lastActivityAt: number;
     hasDraft: boolean;
     active: boolean;
     archived: boolean;
     machineId: string | null;
+    machineName?: string | null;
+    // True only when the machine this session runs on is known to be offline.
+    // A session that merely dropped its own socket is still live work on a live
+    // machine, so the row greys out for this and never for that. Unknown
+    // machines count as online: better an unshaded row than a wrongly dead one.
+    machineOffline: boolean;
     path: string | null;
     homeDir: string | null;
     completedTodosCount: number;
@@ -112,60 +185,88 @@ export interface SessionRowData {
     // Names the git worktree this session runs in; null in the primary tree.
     workspaceId: string | null;
     workspaceName: string | null;
+    // Private project art is already materialized as a local/data URI by sync.
+    projectAvatarUri?: string | null;
+    projectAvatarThumbhash?: string | null;
+    avatarUri?: string | null;
+    avatarThumbhash?: string | null;
 }
 
-function buildSessionRowData(session: Session, unreadSessionIds?: Set<string>): SessionRowData {
+function buildSessionRowData(
+    session: Session,
+    archivingSessionIds: ReadonlySet<string>,
+    unreadSessionIds?: Set<string>,
+    machines?: Record<string, Machine>,
+    projects: Record<string, Project> = {},
+): SessionRowData {
     const isOnline = session.presence === "online";
-    const hasPermissions = !!(session.agentState?.requests && Object.keys(session.agentState.requests).length > 0);
-
-    let state: SessionState;
-    if (!isOnline) {
-        state = 'disconnected';
-    } else if (hasPermissions) {
-        state = 'permission_required';
-    } else if (session.thinking) {
-        state = 'thinking';
-    } else {
-        state = 'waiting';
-    }
+    const state = resolveSessionState({
+        agentState: session.agentState,
+        thinking: session.thinking,
+        isOnline,
+    });
 
     const rigIdentity = getRigIdentity(session.metadata);
     const rigActivity = getRigActivityIndicators(session.metadata);
+    const rigGit = getRigGitSummary(session.metadata);
+    const machineId = session.metadata?.machineId ?? null;
+    const machine = machineId ? machines?.[machineId] : undefined;
+    const projectId = getSessionProjectId(session);
+    const linkedProject = projectId ? projects[projectId] : undefined;
+    const metadataProject = session.metadata?.project;
+    const metadataBranch = session.metadata?.gitBranch;
+    const projectAvatar = isHappyAgentSession(session) ? linkedProject?.avatar : null;
+    const avatar = resolveSessionAvatar(session, projects);
     return {
         id: session.id,
+        botId: session.metadata?.bot?.id ?? null,
+        botUsername: session.metadata?.bot?.username ?? null,
         name: getSessionName(session),
         subtitle: getSessionSubtitle(session),
         avatarId: getSessionAvatarId(session),
         flavor: session.metadata?.flavor ?? null,
         clientId: session.metadata?.client?.id ?? null,
         identityLine: rigIdentity ? `${rigIdentity.clientName} · ${rigIdentity.providerName}` : null,
-        providerKind: session.metadata?.provider?.kind ?? null,
+        providerKind: rigIdentity?.providerKind ?? session.metadata?.provider?.kind ?? null,
         modelName: rigIdentity?.modelName ?? null,
         activitySummary: rigActivity.length > 0
             ? rigActivity.map((item) => `${item.count}${item.queued ? `+${item.queued}` : ''} ${item.key}`).join(' · ')
             : null,
+        gitChangedFiles: rigGit?.changedFiles ?? null,
+        gitCountsExact: rigGit?.countsExact ?? true,
+        gitDeletions: rigGit?.deletions ?? null,
+        gitInsertions: rigGit?.insertions ?? null,
+        gitBranch: typeof metadataBranch === 'string' ? metadataBranch : null,
         state,
-        ...(!session.active && { activeAt: session.activeAt, createdAt: session.createdAt }),
+        createdAt: session.createdAt,
+        lastActivityAt: getSessionActivityAt(session),
+        ...(!session.active && { activeAt: session.activeAt }),
         hasDraft: !!session.draft,
         active: session.active,
-        archived: session.metadata?.lifecycleState === 'archived'
-            || (!isRigMetadata(session.metadata) && !session.active),
-        machineId: session.metadata?.machineId ?? null,
+        archived: isSessionArchived(session, archivingSessionIds),
+        machineId,
+        machineName: machine?.metadata?.displayName || machine?.metadata?.host || session.metadata?.host || null,
+        machineOffline: machine ? !isMachineOnline(machine) : false,
         path: session.metadata?.path ?? null,
         homeDir: session.metadata?.homeDir ?? null,
         completedTodosCount: session.todos?.filter(todo => todo.status === 'completed').length ?? 0,
         totalTodosCount: session.todos?.length ?? 0,
         hasUnread: unreadSessionIds?.has(session.id) ?? false,
-        projectId: session.metadata?.project?.id ?? null,
-        projectName: session.metadata?.project?.name ?? null,
+        projectId,
+        projectName: linkedProject?.name ?? metadataProject?.name ?? null,
         workspaceId: session.metadata?.workspace?.id ?? null,
         workspaceName: session.metadata?.workspace?.name ?? null,
+        projectAvatarUri: projectAvatar?.uri || null,
+        projectAvatarThumbhash: projectAvatar?.thumbhash || null,
+        avatarUri: avatar?.uri || null,
+        avatarThumbhash: avatar?.thumbhash || null,
     };
 }
 
 
 // Unified list item type for SessionsList component
 export type SessionListViewItem =
+    | { type: 'bots'; sessions: SessionRowData[] }
     | { type: 'header'; title: string }
     | { type: 'active-sessions'; sessions: SessionRowData[] }
     | { type: 'project-group'; displayPath: string; machine: Machine }
@@ -194,6 +295,7 @@ interface StorageState {
     pathProjectFiles: Record<string, ProjectFilesList | null>;  // keyed by "machineId:path"
     sessionFileCache: Record<string, Record<string, { content: string | null; diff: string | null; isBinary: boolean; cachedAt: number }>>;
     machines: Record<string, Machine>;
+    projects: Record<string, Project>;
     artifacts: Record<string, DecryptedArtifact>;  // New artifacts storage
     friends: Record<string, UserProfile>;  // All relationships (friends, pending, requested, etc.)
     users: Record<string, UserProfile | null>;  // Global user cache, null = 404/failed fetch
@@ -213,10 +315,13 @@ interface StorageState {
     nativeUpdateStatus: { available: boolean; updateUrl?: string } | null;
     applySessions: (sessions: (Omit<Session, 'presence'> & { presence?: "online" | number })[]) => void;
     applyMachines: (machines: Machine[], replace?: boolean) => void;
+    applyProjects: (projects: Project[], replace?: boolean) => void;
+    applyProjectAvatar: (projectId: string, avatar: Project['avatar']) => void;
     deleteMachine: (machineId: string) => void;
     applyLoaded: () => void;
     applyReady: () => void;
-    applyMessages: (sessionId: string, messages: NormalizedMessage[]) => { changed: string[], hasReadyEvent: boolean, enteredPlanMode: boolean };
+    applyMessages: (sessionId: string, messages: NormalizedMessage[], source?: 'sync' | 'preload') => { changed: string[], settledMessageIds: string[], hasReadyEvent: boolean, enteredPlanMode: boolean };
+    applyUserMessageServerIds: (sessionId: string, pairs: readonly { serverId: string; localId: string }[]) => void;
     applyMessagesLoaded: (sessionId: string) => void;
     applyOlderMessagesPagination: (sessionId: string, info: { hasMore: boolean }) => void;
     applyOlderMessagesLoading: (sessionId: string, isLoading: boolean) => void;
@@ -240,6 +345,7 @@ interface StorageState {
     getActiveSessions: () => Session[];
     updateSessionDraft: (sessionId: string, draft: string | null) => void;
     updateSessionAgentModes: (sessionId: string, patch: SessionAgentModesPatch) => void;
+    updateSessionComposer: (sessionId: string, patch: SessionComposerPatch) => void;
     markSessionMessageSent: (sessionId: string) => void;
     // Artifact methods
     applyArtifacts: (artifacts: DecryptedArtifact[]) => void;
@@ -265,6 +371,15 @@ interface StorageState {
     markSessionRead: (sessionId: string) => void;
     markSessionUnread: (sessionId: string) => void;
     setCurrentViewingSession: (sessionId: string | null) => void;
+    /**
+     * Chats the user has archived, before any machine has agreed to it.
+     *
+     * Memory-only, like the unread set above: an app that was restarted has no
+     * archive still in flight, and the server has long since answered.
+     */
+    archivingSessionIds: Set<string>;
+    markArchiving: (sessionId: string) => void;
+    unmarkArchiving: (sessionId: string) => void;
 }
 
 // Helper function to build unified list view data from sessions and machines
@@ -273,15 +388,33 @@ function buildSessionListViewData(
     // Required on purpose: an omitted set silently rebuilds the list with
     // hasUnread=false everywhere — exactly the bug this parameter caused twice.
     unreadSessionIds: Set<string>,
+    // Also required: rows grey out on their machine's presence, and an omitted
+    // map would quietly report every machine as online.
+    machines: Record<string, Machine>,
+    // Required for the same reason again: a chat left the list on the press,
+    // and a rebuild that forgot which ones those are puts them all back.
+    archivingSessionIds: ReadonlySet<string>,
+    projects: Record<string, Project> = {},
 ): SessionListViewItem[] {
     const rigProjectSessions: Session[] = [];
+    const botSessions: Session[] = [];
     const rigPathSessions: Session[] = [];
     const happySessions: Session[] = [];
+    const archivedSessions: Session[] = [];
 
     Object.values(sessions).forEach(session => {
         // Side chats are hidden children of another session — they render only
         // inside the parent's sidebar panel, never in the top-level list.
         if (session.metadata?.isSideChat) {
+            return;
+        }
+        // The archive is a flat chronological tail, not part of any project.
+        if (isSessionArchived(session, archivingSessionIds)) {
+            archivedSessions.push(session);
+            return;
+        }
+        if (session.metadata?.bot) {
+            botSessions.push(session);
             return;
         }
         if (isRigMetadata(session.metadata)) {
@@ -295,13 +428,11 @@ function buildSessionListViewData(
         }
     });
 
-    // Sort by last activity or creation date (newest first), per user setting — matches applySessions behavior
-    // Activity sort keys off the last user-sent message, not updatedAt: updatedAt
+    // Chat lists always sort by last activity. Activity keys off the last
+    // meaningful message, not updatedAt: updatedAt
     // bumps on every background agent update, which would make the list jump while
-    // several sessions stream at once. lastMessageSentAt only moves when the user acts.
-    const sortKey = storage.getState().settings.sortSessionsByActivity
-        ? (s: Session) => s.lastMessageSentAt ?? s.createdAt
-        : (s: Session) => s.createdAt;
+    // several sessions stream at once.
+    const sortKey = getSessionActivityAt;
     const sortProjectSessions = (items: Session[]) => items.sort((a, b) => {
         const activeDelta = Number(isSessionActive(b)) - Number(isSessionActive(a));
         return activeDelta !== 0 ? activeDelta : sortKey(b) - sortKey(a);
@@ -309,9 +440,21 @@ function buildSessionListViewData(
     sortProjectSessions(rigProjectSessions);
     sortProjectSessions(rigPathSessions);
     sortProjectSessions(happySessions);
+    archivedSessions.sort((a, b) => sortKey(b) - sortKey(a));
 
     const listData: SessionListViewItem[] = [];
-    const toRow = (session: Session) => buildSessionRowData(session, unreadSessionIds);
+    const toRow = (session: Session) => buildSessionRowData(session, archivingSessionIds, unreadSessionIds, machines, projects);
+
+    if (botSessions.length > 0) {
+        botSessions.sort((a, b) => {
+            const machineOrder = (a.metadata?.machineId ?? '').localeCompare(b.metadata?.machineId ?? '');
+            if (machineOrder !== 0) return machineOrder;
+            const aKey = a.metadata!.bot!.orderKey;
+            const bKey = b.metadata!.bot!.orderKey;
+            return aKey < bKey ? -1 : aKey > bKey ? 1 : a.id.localeCompare(b.id);
+        });
+        listData.push({ type: 'bots', sessions: botSessions.map(toRow) });
+    }
 
     const rigProjects = [
         ...buildProjectGroups(rigProjectSessions, toRow, isSessionActive),
@@ -337,6 +480,19 @@ function buildSessionListViewData(
         }
     }
 
+    // The archive trails everything as plain rows, newest first, split by the
+    // day they were last worked on.
+    let currentDay: number | null = null;
+    for (const session of archivedSessions) {
+        const timestamp = sortKey(session);
+        const day = new Date(timestamp).setHours(0, 0, 0, 0);
+        if (day !== currentDay) {
+            currentDay = day;
+            listData.push({ type: 'header', title: relativeDayTitle(timestamp) });
+        }
+        listData.push({ type: 'session', session: toRow(session) });
+    }
+
     return listData;
 }
 
@@ -345,7 +501,6 @@ export const storage = create<StorageState>()((set, get) => {
     let localSettings = loadLocalSettings();
     let purchases = loadPurchases();
     let profile = loadProfile();
-    let sessionDrafts = loadSessionDrafts();
     let sessionLastMessageSentAt = loadSessionLastMessageSentAt();
     return {
         settings,
@@ -355,6 +510,7 @@ export const storage = create<StorageState>()((set, get) => {
         profile,
         sessions: {},
         machines: {},
+        projects: {},
         artifacts: {},  // Initialize artifacts
         friends: {},  // Initialize relationships cache
         users: {},  // Initialize global user cache
@@ -381,6 +537,7 @@ export const storage = create<StorageState>()((set, get) => {
         nativeUpdateStatus: null,
         unreadSessionIds: new Set<string>(),
         currentViewingSessionId: null,
+        archivingSessionIds: new Set<string>(),
         isMutableToolCall: (sessionId: string, callId: string) => {
             const sessionMessages = get().sessionMessages[sessionId];
             if (!sessionMessages) {
@@ -400,10 +557,12 @@ export const storage = create<StorageState>()((set, get) => {
             const state = get();
             return Object.values(state.sessions).filter(s => s.active);
         },
-        applySessions: (sessions: (Omit<Session, 'presence'> & { presence?: "online" | number })[]) => set((state) => {
+        applySessions: (sessions: (Omit<Session, 'presence'> & { presence?: "online" | number })[]) => {
+            const pendingComposerWrites: string[] = [];
+            set((state) => {
             // Load drafts if sessions are empty (initial load)
             const isInitialLoad = Object.keys(state.sessions).length === 0;
-            const savedDrafts = isInitialLoad ? sessionDrafts : {};
+            const savedDrafts = isInitialLoad ? loadSessionDrafts() : {};
             const savedLastMessageSentAt = isInitialLoad ? sessionLastMessageSentAt : {};
 
             // Merge new sessions with existing ones
@@ -434,12 +593,49 @@ export const storage = create<StorageState>()((set, get) => {
                         ? session.metadata[field] ?? null
                         : existing;
                 };
+                // Local activity timestamp — preserve in-memory value, else restore from MMKV.
+                const resolvedLastMessageSentAt = state.sessions[session.id]?.lastMessageSentAt ?? savedLastMessageSentAt[session.id];
+
+                if (isRigMetadataV1(session.metadata)) {
+                    // Happy Agent syncs the whole composer through metadata.
+                    // A later metadata version settles equal-stamped edits too.
+                    // Only a strictly newer local draft stays ahead of the server.
+                    const existing = state.sessions[session.id];
+                    if (existing && existing.metadataVersion > session.metadataVersion) {
+                        session = { ...session, metadata: existing.metadata, metadataVersion: existing.metadataVersion };
+                    }
+                    // Disk is only the source when this session is not already in memory;
+                    // an in-memory stamp must win over a stale MMKV snapshot.
+                    const saved = existing ? undefined : loadRigComposerDraft(session.id);
+                    const remoteStamp = session.metadata?.draftUpdatedAt ?? null;
+                    const localStamp = existing?.draftUpdatedAt ?? saved?.draftUpdatedAt ?? null;
+                    const adopt = localStamp === null || (remoteStamp !== null && remoteStamp >= localStamp);
+                    const composer = adopt ? getRigComposerState(session.metadata) : null;
+                    // A clear can echo before the message updates lastMode. Keep
+                    // its captured selection until lastMode actually changes.
+                    const keepClearedMode = existing && existing.draft == null
+                        && composer?.text === null && remoteStamp === localStamp
+                        && equal(existing.metadata?.lastMode, session.metadata?.lastMode);
+                    mergedSessions[session.id] = {
+                        ...session,
+                        presence,
+                        draft: composer ? composer.text : existing?.draft ?? saved?.text ?? null,
+                        draftUpdatedAt: composer ? remoteStamp : localStamp,
+                        permissionMode: composer && !keepClearedMode ? composer.permissionMode : existing?.permissionMode ?? saved?.permissionMode ?? null,
+                        modelMode: composer && !keepClearedMode ? composer.modelMode : existing?.modelMode ?? saved?.modelMode ?? null,
+                        effortLevel: composer && !keepClearedMode ? composer.effortLevel : existing?.effortLevel ?? saved?.effortLevel ?? null,
+                        serviceTier: composer && !keepClearedMode ? composer.serviceTier : existing?.serviceTier ?? saved?.serviceTier,
+                        lastMessageSentAt: resolvedLastMessageSentAt,
+                    };
+                    if (!existing && !adopt && localStamp !== null && (remoteStamp === null || localStamp > remoteStamp)) {
+                        pendingComposerWrites.push(session.id);
+                    }
+                    return;
+                }
+
                 const resolvedPermissionMode = resolveModePick('permissionMode');
                 const resolvedModelMode = resolveModePick('modelMode');
                 const resolvedEffortLevel = resolveModePick('effortLevel');
-
-                // Local activity timestamp — preserve in-memory value, else restore from MMKV.
-                const resolvedLastMessageSentAt = state.sessions[session.id]?.lastMessageSentAt ?? savedLastMessageSentAt[session.id];
 
                 mergedSessions[session.id] = {
                     ...session,
@@ -477,10 +673,8 @@ export const storage = create<StorageState>()((set, get) => {
                 }
             });
 
-            // Sort both arrays by last activity or creation date (newest first), per user setting
-            const sortKey = get().settings.sortSessionsByActivity
-                ? (s: Session) => s.lastMessageSentAt ?? s.createdAt
-                : (s: Session) => s.createdAt;
+            // Keep both sections in canonical chat-list order: newest activity first.
+            const sortKey = getSessionActivityAt;
             activeSessions.sort((a, b) => sortKey(b) - sortKey(a));
             inactiveSessions.sort((a, b) => sortKey(b) - sortKey(a));
 
@@ -548,24 +742,39 @@ export const storage = create<StorageState>()((set, get) => {
                     const reducerResult = reducer(existingSessionMessages.reducerState, [], newSession.agentState);
                     const processedMessages = reducerResult.messages;
 
-                    // Always update the session messages, even if no new messages were created
-                    // This ensures the reducer state is updated with the new AgentState
-                    const mergedMessagesMap = { ...existingSessionMessages.messagesMap };
-                    processedMessages.forEach(message => {
-                        mergedMessagesMap[message.id] = message;
-                    });
+                    // Only rebuild when the reducer actually produced something.
+                    //
+                    // An agentState bump carries no new messages most of the
+                    // time — a heartbeat, a thinking flag, a permission answer.
+                    // Rebuilding the array anyway handed `messages` a fresh
+                    // identity on every such tick, and `useSessionMessages`
+                    // compares it by identity: that re-rendered ChatList, which
+                    // re-derived displayItems and the copy-text map, which gave
+                    // `renderItem` a new identity, which defeated every row's
+                    // memo and re-rendered the whole window. Measured at 475
+                    // renderItem calls/sec and a 525ms frame while streaming.
+                    //
+                    // reducerState is mutated in place and is already stored by
+                    // reference, so leaving the entry untouched still carries
+                    // the new agentState forward.
+                    if (processedMessages.length > 0) {
+                        const mergedMessagesMap = { ...existingSessionMessages.messagesMap };
+                        processedMessages.forEach(message => {
+                            mergedMessagesMap[message.id] = message;
+                        });
 
-                    const messagesArray = Object.values(mergedMessagesMap)
-                        .sort((a, b) => b.createdAt - a.createdAt);
+                        const messagesArray = Object.values(mergedMessagesMap)
+                            .sort((a, b) => messageSortKey(b) - messageSortKey(a));
 
-                    updatedSessionMessages[session.id] = {
-                        messages: messagesArray,
-                        messagesMap: mergedMessagesMap,
-                        reducerState: existingSessionMessages.reducerState, // The reducer modifies state in-place, so this has the updates
-                        isLoaded: existingSessionMessages.isLoaded,
-                        hasMoreOlder: existingSessionMessages.hasMoreOlder,
-                        isLoadingOlder: existingSessionMessages.isLoadingOlder
-                    };
+                        updatedSessionMessages[session.id] = {
+                            messages: messagesArray,
+                            messagesMap: mergedMessagesMap,
+                            reducerState: existingSessionMessages.reducerState, // The reducer modifies state in-place, so this has the updates
+                            isLoaded: existingSessionMessages.isLoaded,
+                            hasMoreOlder: existingSessionMessages.hasMoreOlder,
+                            isLoadingOlder: existingSessionMessages.isLoadingOlder
+                        };
+                    }
 
                     // IMPORTANT: Copy latestUsage from reducerState to Session for immediate availability
                     if (existingSessionMessages.reducerState.latestUsage) {
@@ -599,11 +808,30 @@ export const storage = create<StorageState>()((set, get) => {
                 }
             });
 
+            // A chat held out of the list by hand until the archive lands can
+            // be let go the moment the server says the same thing — or the
+            // moment it stops being a chat at all. Held any longer the set only
+            // grows, and nothing would ever empty it.
+            let archivingSessionIds = state.archivingSessionIds;
+            state.archivingSessionIds.forEach((sessionId) => {
+                const session = mergedSessions[sessionId];
+                if (session && !isSessionArchived(session, NO_SESSIONS_ARCHIVING)) return;
+                if (archivingSessionIds === state.archivingSessionIds) {
+                    archivingSessionIds = new Set(archivingSessionIds);
+                }
+                archivingSessionIds.delete(sessionId);
+            });
+
             // Build new unified list view data
             const sessionListViewData = buildSessionListViewData(
                 mergedSessions,
                 unreadSessionIds,
+                state.machines,
+                archivingSessionIds,
+                state.projects,
             );
+
+            for (const session of sessions) persistRigComposerDraft(mergedSessions[session.id]);
 
             return {
                 ...state,
@@ -612,8 +840,13 @@ export const storage = create<StorageState>()((set, get) => {
                 sessionListViewData,
                 sessionMessages: updatedSessionMessages,
                 unreadSessionIds,
+                archivingSessionIds,
             };
-        }),
+            });
+            for (const sessionId of pendingComposerWrites) {
+                rigComposerFlushPending(sessionId);
+            }
+        },
         applyLoaded: () => set((state) => {
             const result = {
                 ...state,
@@ -625,8 +858,9 @@ export const storage = create<StorageState>()((set, get) => {
             ...state,
             isDataReady: true
         })),
-        applyMessages: (sessionId: string, messages: NormalizedMessage[]) => {
+        applyMessages: (sessionId: string, messages: NormalizedMessage[], source = 'sync') => {
             let changed = new Set<string>();
+            let settledMessageIds: string[] = [];
             let hasReadyEvent = false;
 
             // Track plan mode transitions through the batch in order.
@@ -634,20 +868,11 @@ export const storage = create<StorageState>()((set, get) => {
             // tells us whether the batch ends with an unresolved plan entry.
             // This prevents history replays (which contain both Enter + Exit) from
             // re-triggering plan mode, while still catching real-time EnterPlanMode.
-            let shouldEnterPlanMode = false;
-            for (const msg of messages) {
-                if (msg.role === 'agent') {
-                    for (const c of msg.content) {
-                        if (c.type === 'tool-call') {
-                            if (c.name === 'EnterPlanMode' || c.name === 'enter_plan_mode') {
-                                shouldEnterPlanMode = true;
-                            } else if (c.name === 'ExitPlanMode' || c.name === 'exit_plan_mode') {
-                                shouldEnterPlanMode = false;
-                            }
-                        }
-                    }
-                }
-            }
+            const enteredPlanMode = messagePlanMode(messages) === true;
+
+            // Speculative history must not alter a session's operating mode.
+            // Its synced metadata remains authoritative while we warm the UI.
+            const shouldEnterPlanMode = enteredPlanMode && source !== 'preload';
 
             set((state) => {
 
@@ -668,11 +893,20 @@ export const storage = create<StorageState>()((set, get) => {
                 // Messages are already normalized, no need to process them again
                 const normalizedMessages = messages;
 
-                // Run reducer with agentState
-                const reducerResult = reducer(existingSession.reducerState, normalizedMessages, agentState);
+                // Run reducer with agentState. A Happy Agent daemon that advertises
+                // receipts reports when a message actually reaches the agent, so
+                // there a just-sent message waits rather than claiming a place the
+                // agent has not read yet. Daemons without the capability commit
+                // messages at send time, exactly as before.
+                const reducerResult = reducer(existingSession.reducerState, normalizedMessages, agentState, {
+                    holdUserMessagesUntilAccepted: rigSendsMessageReceipts(session?.metadata),
+                });
                 const processedMessages = reducerResult.messages;
                 for (let message of processedMessages) {
                     changed.add(message.id);
+                }
+                if (reducerResult.settledMessageIds) {
+                    settledMessageIds = reducerResult.settledMessageIds;
                 }
                 if (reducerResult.hasReadyEvent) {
                     hasReadyEvent = true;
@@ -686,7 +920,7 @@ export const storage = create<StorageState>()((set, get) => {
 
                 // Convert to array and sort by createdAt
                 const messagesArray = Object.values(mergedMessagesMap)
-                    .sort((a, b) => b.createdAt - a.createdAt);
+                    .sort((a, b) => messageSortKey(b) - messageSortKey(a));
 
                 // Update session with todos and latestUsage
                 // IMPORTANT: We extract latestUsage from the mutable reducerState and copy it to the Session object
@@ -726,8 +960,45 @@ export const storage = create<StorageState>()((set, get) => {
                 };
             });
 
-            return { changed: Array.from(changed), hasReadyEvent, enteredPlanMode: shouldEnterPlanMode };
+            return { changed: Array.from(changed), settledMessageIds, hasReadyEvent, enteredPlanMode };
         },
+        applyUserMessageServerIds: (sessionId: string, pairs: readonly { serverId: string; localId: string }[]) => set((state) => {
+            if (pairs.length === 0) {
+                return state;
+            }
+            const existingSession: SessionMessages = state.sessionMessages[sessionId] || {
+                messages: [],
+                messagesMap: {},
+                reducerState: createReducer(),
+                isLoaded: false,
+                hasMoreOlder: false,
+                isLoadingOlder: false,
+            };
+            // The joins land in the mutable reducer state either way; a state
+            // update is only owed when a held message settled and must re-render.
+            const settled = registerUserMessageServerIds(existingSession.reducerState, pairs);
+            if (settled.length === 0 && state.sessionMessages[sessionId]) {
+                return state;
+            }
+            const mergedMessagesMap = { ...existingSession.messagesMap };
+            for (const message of settled) {
+                mergedMessagesMap[message.id] = message;
+            }
+            const messagesArray = Object.values(mergedMessagesMap)
+                .sort((a, b) => messageSortKey(b) - messageSortKey(a));
+            return {
+                ...state,
+                sessionMessages: {
+                    ...state.sessionMessages,
+                    [sessionId]: {
+                        ...existingSession,
+                        messages: messagesArray,
+                        messagesMap: mergedMessagesMap,
+                        reducerState: existingSession.reducerState,
+                    }
+                }
+            };
+        }),
         applyMessagesLoaded: (sessionId: string) => set((state) => {
             const existingSession = state.sessionMessages[sessionId];
             let result: StorageState;
@@ -754,7 +1025,7 @@ export const storage = create<StorageState>()((set, get) => {
                     });
 
                     messages = Object.values(messagesMap)
-                        .sort((a, b) => b.createdAt - a.createdAt);
+                        .sort((a, b) => messageSortKey(b) - messageSortKey(a));
                 }
 
                 // Extract latestUsage from reducerState if available and update session
@@ -965,7 +1236,8 @@ export const storage = create<StorageState>()((set, get) => {
             ...state,
             voiceSessionGeneration: state.voiceSessionGeneration + 1
         })),
-        setSocketStatus: (status: 'disconnected' | 'connecting' | 'connected' | 'error') => set((state) => {
+        setSocketStatus: (status: 'disconnected' | 'connecting' | 'connected' | 'error') => {
+            set((state) => {
             const now = Date.now();
             const updates: Partial<StorageState> = {
                 socketStatus: status
@@ -982,7 +1254,9 @@ export const storage = create<StorageState>()((set, get) => {
                 ...state,
                 ...updates
             };
-        }),
+            });
+            if (status === 'connected') rigComposerFlushAheadSessions();
+        },
         updateSessionDraft: (sessionId: string, draft: string | null) => set((state) => {
             const session = state.sessions[sessionId];
             if (!session) return state;
@@ -1016,7 +1290,7 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 sessions: updatedSessions,
-                sessionListViewData: buildSessionListViewData(updatedSessions, state.unreadSessionIds)
+                sessionListViewData: buildSessionListViewData(updatedSessions, state.unreadSessionIds, state.machines, state.archivingSessionIds, state.projects)
             };
         }),
         // Permission / model / effort picks are local mirrors of synced session
@@ -1038,6 +1312,20 @@ export const storage = create<StorageState>()((set, get) => {
                         ...(patch.effortLevel !== undefined && { effortLevel: patch.effortLevel }),
                     }
                 }
+            };
+        }),
+        // Happy Agent composer mirror. Use rigComposer.ts to change it — it
+        // stamps the edit, calls this for the optimistic update, and writes the
+        // whole draft into synced session metadata.
+        updateSessionComposer: (sessionId: string, patch: SessionComposerPatch) => set((state) => {
+            const session = state.sessions[sessionId];
+            if (!session) return state;
+            const updated = { ...session, ...patch };
+            const updatedSessions = { ...state.sessions, [sessionId]: updated };
+            persistRigComposerDraft(updated);
+            return {
+                ...state,
+                sessions: updatedSessions,
             };
         }),
         markSessionMessageSent: (sessionId: string) => set((state) => {
@@ -1067,7 +1355,7 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 sessions: updatedSessions,
-                sessionListViewData: buildSessionListViewData(updatedSessions, state.unreadSessionIds)
+                sessionListViewData: buildSessionListViewData(updatedSessions, state.unreadSessionIds, state.machines, state.archivingSessionIds, state.projects)
             };
         }),
         getSessionPathKey: (sessionId: string): string | null => {
@@ -1093,16 +1381,57 @@ export const storage = create<StorageState>()((set, get) => {
                 });
             }
 
-            // Rebuild sessionListViewData to reflect machine changes
+            // Rebuild sessionListViewData to reflect machine changes — from the
+            // merged map, since a machine going offline is exactly what has to
+            // reach the rows here.
             const sessionListViewData = buildSessionListViewData(
                 state.sessions,
-                state.unreadSessionIds
+                state.unreadSessionIds,
+                mergedMachines,
+                state.archivingSessionIds,
+                state.projects,
             );
 
             return {
                 ...state,
                 machines: mergedMachines,
                 sessionListViewData
+            };
+        }),
+        applyProjects: (projects: Project[], replace: boolean = false) => set((state) => {
+            const mergedProjects: Record<string, Project> = replace ? {} : { ...state.projects };
+            projects.forEach((project) => {
+                mergedProjects[project.id] = project;
+            });
+            return {
+                ...state,
+                projects: mergedProjects,
+                sessionListViewData: buildSessionListViewData(
+                    state.sessions,
+                    state.unreadSessionIds,
+                    state.machines,
+                    state.archivingSessionIds,
+                    mergedProjects,
+                ),
+            };
+        }),
+        applyProjectAvatar: (projectId: string, avatar: Project['avatar']) => set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            const projects = {
+                ...state.projects,
+                [projectId]: { ...project, avatar },
+            };
+            return {
+                ...state,
+                projects,
+                sessionListViewData: buildSessionListViewData(
+                    state.sessions,
+                    state.unreadSessionIds,
+                    state.machines,
+                    state.archivingSessionIds,
+                    projects,
+                ),
             };
         }),
         deleteMachine: (machineId: string) => set((state) => {
@@ -1113,7 +1442,7 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 machines: remaining,
-                sessionListViewData: buildSessionListViewData(state.sessions, state.unreadSessionIds)
+                sessionListViewData: buildSessionListViewData(state.sessions, state.unreadSessionIds, remaining, state.archivingSessionIds, state.projects)
             };
         }),
         // Artifact methods
@@ -1174,6 +1503,7 @@ export const storage = create<StorageState>()((set, get) => {
             const drafts = loadSessionDrafts();
             delete drafts[sessionId];
             saveSessionDrafts(drafts);
+            saveRigComposerDraft(sessionId, null);
 
             const lastMessageSentAt = loadSessionLastMessageSentAt();
             delete lastMessageSentAt[sessionId];
@@ -1181,7 +1511,7 @@ export const storage = create<StorageState>()((set, get) => {
 
             // Rebuild sessionListViewData without the deleted session.
             // Pass unreadSessionIds so the remaining sessions keep their unread badges.
-            const sessionListViewData = buildSessionListViewData(remainingSessions, state.unreadSessionIds);
+            const sessionListViewData = buildSessionListViewData(remainingSessions, state.unreadSessionIds, state.machines, state.archivingSessionIds, state.projects);
             
             return {
                 ...state,
@@ -1321,7 +1651,7 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 unreadSessionIds: next,
-                sessionListViewData: buildSessionListViewData(state.sessions, next),
+                sessionListViewData: buildSessionListViewData(state.sessions, next, state.machines, state.archivingSessionIds, state.projects),
             };
         }),
         markSessionUnread: (sessionId: string) => set((state) => {
@@ -1331,7 +1661,7 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 unreadSessionIds: next,
-                sessionListViewData: buildSessionListViewData(state.sessions, next),
+                sessionListViewData: buildSessionListViewData(state.sessions, next, state.machines, state.archivingSessionIds, state.projects),
             };
         }),
         setCurrentViewingSession: (sessionId: string | null) => set((state) => {
@@ -1345,8 +1675,37 @@ export const storage = create<StorageState>()((set, get) => {
                 currentViewingSessionId: sessionId,
                 unreadSessionIds: next,
                 ...(next !== state.unreadSessionIds ? {
-                    sessionListViewData: buildSessionListViewData(state.sessions, next),
+                    sessionListViewData: buildSessionListViewData(state.sessions, next, state.machines, state.archivingSessionIds, state.projects),
                 } : {}),
+            };
+        }),
+        /**
+         * Archiving is several round trips long — a worktree check, a kill on
+         * the machine, sometimes a server-side archive after it — and the row
+         * used to sit in the list for every one of them. Called before the
+         * first of them, it takes the chat out of the live list on the press.
+         *
+         * Reversed by `unmarkArchiving` if the archive fails, which is the only
+         * thing that brings the chat back.
+         */
+        markArchiving: (sessionId: string) => set((state) => {
+            if (state.archivingSessionIds.has(sessionId)) return state;
+            const archivingSessionIds = new Set(state.archivingSessionIds);
+            archivingSessionIds.add(sessionId);
+            return {
+                ...state,
+                archivingSessionIds,
+                sessionListViewData: buildSessionListViewData(state.sessions, state.unreadSessionIds, state.machines, archivingSessionIds, state.projects),
+            };
+        }),
+        unmarkArchiving: (sessionId: string) => set((state) => {
+            if (!state.archivingSessionIds.has(sessionId)) return state;
+            const archivingSessionIds = new Set(state.archivingSessionIds);
+            archivingSessionIds.delete(sessionId);
+            return {
+                ...state,
+                archivingSessionIds,
+                sessionListViewData: buildSessionListViewData(state.sessions, state.unreadSessionIds, state.machines, archivingSessionIds, state.projects),
             };
         }),
     }
@@ -1358,6 +1717,26 @@ export function useSessions() {
 
 export function useSession(id: string): Session | null {
     return storage(useShallow((state) => state.sessions[id] ?? null));
+}
+
+export function useProjects(): Record<string, Project> {
+    return storage(useShallow((state) => state.projects));
+}
+
+export function useSessionProjectAvatar(sessionId: string): Project['avatar'] {
+    return storage(useShallow((state) => {
+        const session = state.sessions[sessionId];
+        if (!session || !isHappyAgentSession(session)) return null;
+        const projectId = getSessionProjectId(session);
+        return projectId ? state.projects[projectId]?.avatar ?? null : null;
+    }));
+}
+
+export function useSessionAvatar(sessionId: string): Project['avatar'] {
+    return storage(useShallow((state) => {
+        const session = state.sessions[sessionId];
+        return session ? resolveSessionAvatar(session, state.projects) : null;
+    }));
 }
 
 /**
@@ -1552,10 +1931,32 @@ export function useSocketStatus() {
     })));
 }
 
-/** Agent-to-user communications this session is currently waiting on. */
+/**
+ * Agent-to-user communications this session is currently waiting on.
+ *
+ * Deep-equal, not shallow: this selector mints a fresh object per pending
+ * communication on every call, and shallow compares those elements by identity.
+ * Under `useShallow` a session with even one pending request therefore reports a
+ * changed snapshot on every read, which re-renders, which reads again — the
+ * render loop that used to crash any session holding a question. An empty list
+ * shallow-compares equal, which is why only sessions with a live request fell
+ * over.
+ */
 export function useSessionPendingCommunications(sessionId: string): PendingAgentCommunication[] {
-    return storage(useShallow((state) =>
+    return storage(useDeepEqual((state) =>
         selectPendingCommunications(state.sessions[sessionId]?.agentState ?? null)));
+}
+
+/**
+ * Agent form joined to one transcript tool call, pending or completed.
+ *
+ * Deep-equal for the same reason as the hook above: the selection is a fresh
+ * object whose `questions` is a fresh array, so shallow compares those by
+ * identity and never settles.
+ */
+export function useSessionAgentFormCommunication(sessionId: string, toolUseId: string) {
+    return storage(useDeepEqual((state) =>
+        selectAgentFormCommunication(state.sessions[sessionId]?.agentState ?? null, toolUseId)));
 }
 
 export function useSessionGitStatus(sessionId: string): GitStatus | null {

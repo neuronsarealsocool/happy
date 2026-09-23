@@ -2,6 +2,8 @@ import * as React from 'react';
 import { View } from 'react-native';
 import { Image } from 'expo-image';
 
+const HEADER_LOGO_SIZE = 19;
+
 /**
  * Shared header logo component used across all main tabs.
  * Extracted to prevent flickering on tab switches - when each tab
@@ -18,7 +20,7 @@ export const HeaderLogo = React.memo(() => {
             <Image
                 source={require('@/assets/images/logo-black.png')}
                 contentFit="contain"
-                style={{ width: 24, height: 24 }}
+                style={{ width: HEADER_LOGO_SIZE, height: HEADER_LOGO_SIZE }}
             />
         </View>
     );

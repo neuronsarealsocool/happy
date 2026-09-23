@@ -1,6 +1,7 @@
 import { Ionicons, Octicons } from '@expo/vector-icons';
+import Svg, { Circle } from 'react-native-svg';
 import * as React from 'react';
-import { Keyboard, View, Platform, useWindowDimensions, Text, ActivityIndicator, Pressable, TouchableWithoutFeedback } from 'react-native';
+import { Keyboard, View, Platform, Text, ActivityIndicator, Pressable, TouchableWithoutFeedback, LayoutChangeEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { AgentInputAttachmentStrip } from './AgentInputAttachmentStrip';
 import type { AttachmentPreview } from '@/sync/attachmentTypes';
@@ -9,7 +10,7 @@ import { layout } from './layout';
 import { MultiTextInput, KeyPressEvent } from './MultiTextInput';
 import { Typography } from '@/constants/Typography';
 import { PermissionMode, ModelMode } from './PermissionModeSelector';
-import { EffortLevel } from './modelModeOptions';
+import { EffortLevel, groupModelModesByProvider, truncateModelLabel } from './modelModeOptions';
 import { hapticsLight, hapticsError } from './haptics';
 import { Shaker, ShakeInstance } from './Shaker';
 import { StatusDot } from './StatusDot';
@@ -17,23 +18,24 @@ import { useActiveWord } from './autocomplete/useActiveWord';
 import { useActiveSuggestions } from './autocomplete/useActiveSuggestions';
 import { AgentInputAutocomplete } from './AgentInputAutocomplete';
 import { FloatingOverlay } from './FloatingOverlay';
-import { SessionStatusBar } from './SessionStatusBar';
 import { TextInputState, MultiTextInputHandle } from './MultiTextInput';
 import { applySuggestion } from './autocomplete/applySuggestion';
-import { GitStatusBadge, useHasMeaningfulGitStatus } from './GitStatusBadge';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
+import { useLayoutDimensions } from '@/utils/responsive';
 import { useSetting } from '@/sync/storage';
 import { getShortcutBindingForAction, shortcutEquals, shortcutFromReactKeyboardEvent } from '@/utils/keyboardShortcuts';
 import { hackMode, hackModes } from '@/sync/modeHacks';
+import { getPermissionModeMenuLabel, getPermissionModeShortLabel } from '@/utils/permissionModeLabels';
+import { getUsageLimitDisplayPercentage, getUsageLimitRows, formatUsageLimitResetTime, type UsageLimitsLike } from '@/utils/sessionStatusBar';
 import { Theme } from '@/theme';
 import { t } from '@/text';
 import { Metadata } from '@/sync/storageTypes';
 import { isRunningOnMac } from '@/utils/platform';
 import { MobileGlassSurface } from './MobileGlass';
-import { AnimatedClickAwayBackdrop } from './AnimatedOverlay';
+import { AnimatedClickAwayBackdrop, AnimatedFade } from './AnimatedOverlay';
 import { BubblePressable } from './BubblePressable';
 import { resolveAgentInputPrimaryAction } from './agentInputPrimaryAction';
-import { NativeSettingsMenu, type NativeSettingsMenuGroup } from './NativeSettingsMenu';
+import { NativeSettingsMenu, type NativeSettingsMenuGroup, type NativeSettingsMenuOption } from './NativeSettingsMenu';
 import { ProviderIcon } from './ProviderIcon';
 import { isRigMetadata } from '@/sync/rig';
 import {
@@ -41,8 +43,15 @@ import {
     resolveMobileComposerActionGeometry,
     resolveMobileComposerActionRowGeometry,
     resolveMobileComposerMenuGeometry,
+    resolveMobileComposerMiddleGeometry,
 } from './agentInputLayout';
 import { shouldUseExpoNativeSettingsMenu } from './glassInteractionPolicy';
+
+// Drops bubble through document once per mounted composer. A WeakSet keeps a
+// background drop from being accepted by multiple visible composers without
+// retaining completed browser events.
+const claimedDropEvents = new WeakSet<DragEvent>();
+const mountedComposerNodes = new Set<HTMLElement>();
 
 interface AgentInputProps {
     // `initialValue` seeds the uncontrolled textarea once; keystrokes never
@@ -50,6 +59,12 @@ interface AgentInputProps {
     // deletion crisp. The parent reads the live text via the imperative ref.
     initialValue: string;
     placeholder: string;
+    /**
+     * False leaves the composer on screen but out of reach — no caret, no
+     * keyboard, nothing to tap into. For a chat that has not started yet, where
+     * the composer is there to hold the layout still rather than to be used.
+     */
+    editable?: boolean;
     // Fires on every keystroke so the parent can sync derived state (drafts,
     // hasText) — typically wrapped in startTransition / debounce by the caller.
     onChangeText?: (text: string) => void;
@@ -92,12 +107,16 @@ interface AgentInputProps {
         contextWindow?: number;
     };
     alwaysShowContextSize?: boolean;
-    showSessionStatusInfoInSettings?: boolean;
     /** Hide the auxiliary connection/mode row while reading older messages. */
     showStatusDetails?: boolean;
-    sessionStatusGitBranch?: string | null;
-    sessionStatusModelLabel?: string | null;
-    sessionStatusEffortLabel?: string | null;
+    /**
+     * Reports the composer card's top offset from AgentInput's own top edge.
+     * The status/chips rows above the card keep their layout space when faded
+     * out, so callers anchoring to AgentInput would float above empty space.
+     */
+    onActionAreaOffsetChange?: (offset: number) => void;
+    /** Plan quota windows from agent state, for the week stat and its popup. */
+    sessionStatusUsageLimits?: UsageLimitsLike | null;
     onFileViewerPress?: () => void;
     agentType?: 'claude' | 'codex' | 'gemini' | 'openclaw' | 'agy';
     onAgentClick?: () => void;
@@ -124,18 +143,24 @@ function permissionKindIcon(kind: string | null | undefined): React.ComponentPro
     return 'folder-open-outline';
 }
 
-const MOBILE_ICON_MENU_GEOMETRY = resolveMobileComposerMenuGeometry('icon');
 const MOBILE_MODEL_MENU_GEOMETRY = resolveMobileComposerMenuGeometry('model');
 const MOBILE_EFFORT_MENU_GEOMETRY = resolveMobileComposerMenuGeometry('effort');
+const MOBILE_PERMISSION_MENU_GEOMETRY = resolveMobileComposerMenuGeometry('permission');
 const MOBILE_ACTION_ROW_GEOMETRY = resolveMobileComposerActionRowGeometry();
+const MOBILE_MIDDLE_GEOMETRY = resolveMobileComposerMiddleGeometry();
 const MOBILE_ICON_ACTION_GEOMETRY = resolveMobileComposerActionGeometry('icon');
 const MOBILE_PRIMARY_ACTION_GEOMETRY = resolveMobileComposerActionGeometry('primary');
+
+// Shared with the action-area offset reported to onActionAreaOffsetChange —
+// the Shaker's layout.y is relative to innerContainer, which sits this far
+// below AgentInput's top edge.
+const CONTAINER_TOP_PADDING = 8;
 
 const stylesheet = StyleSheet.create((theme, runtime) => ({
     container: {
         alignItems: 'center',
         paddingBottom: 8,
-        paddingTop: 8,
+        paddingTop: CONTAINER_TOP_PADDING,
     },
     innerContainer: {
         width: '100%',
@@ -321,13 +346,18 @@ const stylesheet = StyleSheet.create((theme, runtime) => ({
         paddingHorizontal: 0,
     },
     mobileActionButtonsContainer: MOBILE_ACTION_ROW_GEOMETRY,
+    mobileActionMiddle: MOBILE_MIDDLE_GEOMETRY,
     mobileIconButton: MOBILE_ICON_ACTION_GEOMETRY,
-    mobileIconMenuFrame: MOBILE_ICON_MENU_GEOMETRY.frame,
-    mobileIconMenuContent: MOBILE_ICON_MENU_GEOMETRY.content,
     mobileModelMenuFrame: MOBILE_MODEL_MENU_GEOMETRY.frame,
     mobileModelMenuContent: MOBILE_MODEL_MENU_GEOMETRY.content,
     mobileEffortMenuFrame: MOBILE_EFFORT_MENU_GEOMETRY.frame,
     mobileEffortMenuContent: MOBILE_EFFORT_MENU_GEOMETRY.content,
+    mobilePermissionMenuFrame: MOBILE_PERMISSION_MENU_GEOMETRY.frame,
+    mobilePermissionMenuContent: MOBILE_PERMISSION_MENU_GEOMETRY.content,
+    mobilePermissionButton: {
+        ...MOBILE_PERMISSION_MENU_GEOMETRY.content,
+        flexShrink: 0,
+    },
     mobileModeButton: {
         flex: 1,
         minWidth: 0,
@@ -430,26 +460,46 @@ const stylesheet = StyleSheet.create((theme, runtime) => ({
     },
 }));
 
-const getContextWarning = (contextSize: number, alwaysShow: boolean = false, theme: Theme, contextWindow?: number) => {
+const formatTokenCount = (tokens: number): string => {
+    if (tokens < 1000) {
+        return `${Math.max(0, Math.round(tokens))}`;
+    }
+    if (tokens < 999500) {
+        return `${Math.round(tokens / 1000)}k`;
+    }
+    const millions = tokens / 1000000;
+    return `${millions >= 10 ? Math.round(millions) : Math.round(millions * 10) / 10}M`;
+};
+
+const getContextStatus = (contextSize: number, alwaysShow: boolean = false, theme: Theme, contextWindow: number | undefined) => {
     // Until the session reports its window there is no honest denominator, so
     // nothing is shown rather than dividing by a guess — a percentage that
     // later corrects itself upward reads as the context refilling.
     if (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow) || contextWindow <= 0) {
         return null;
     }
-    const maxContextSize = contextWindow;
-    const percentageUsed = (contextSize / maxContextSize) * 100;
-    const percentageRemaining = Math.max(0, Math.min(100, 100 - percentageUsed));
+    const percentageUsed = Math.max(0, Math.min(100, (contextSize / contextWindow) * 100));
+    const percentageRemaining = 100 - percentageUsed;
 
+    let color: string;
     if (percentageRemaining <= 5) {
-        return { text: t('agentInput.context.remaining', { percent: Math.round(percentageRemaining) }), color: theme.colors.warningCritical };
+        color = theme.colors.warningCritical;
     } else if (percentageRemaining <= 10) {
-        return { text: t('agentInput.context.remaining', { percent: Math.round(percentageRemaining) }), color: theme.colors.warning };
+        color = theme.colors.warning;
     } else if (alwaysShow) {
-        // Show context remaining in neutral color when not near limit
-        return { text: t('agentInput.context.remaining', { percent: Math.round(percentageRemaining) }), color: theme.colors.warning };
+        color = theme.colors.textSecondary;
+    } else {
+        return null; // No display needed
     }
-    return null; // No display needed
+
+    return {
+        percent: Math.round(percentageUsed),
+        detailText: t('agentInput.context.detailContext', {
+            used: formatTokenCount(contextSize),
+            total: formatTokenCount(contextWindow),
+        }),
+        color,
+    };
 };
 
 // Stable sub-trees extracted from AgentInput so they don't reconcile when
@@ -459,22 +509,11 @@ const getContextWarning = (contextSize: number, alwaysShow: boolean = false, the
 
 type StatusRowProps = {
     connectionStatus?: AgentInputProps['connectionStatus'];
-    contextWarning: { text: string; color: string } | null;
-    displayPermissionMode: ReturnType<typeof hackMode> | null;
-    permissionModeKey: string;
-    permissionSemanticKind?: string | null;
-    isSandboxedYoloMode: boolean;
-    permissionLabel: string | null;
-    zenMode?: boolean;
 };
 
 const AgentInputStatusRow = React.memo(function AgentInputStatusRow(p: StatusRowProps) {
     const { theme } = useUnistyles();
-    const showPermissionBadge = !!p.displayPermissionMode
-        && p.permissionModeKey !== 'default'
-        && !p.zenMode
-        && !!p.permissionLabel;
-    if (!p.connectionStatus && !p.contextWarning && !showPermissionBadge) {
+    if (!p.connectionStatus) {
         return null;
     }
     return (
@@ -494,6 +533,8 @@ const AgentInputStatusRow = React.memo(function AgentInputStatusRow(p: StatusRow
                                 color={p.connectionStatus.dotColor}
                                 isPulsing={p.connectionStatus.isPulsing}
                                 size={6}
+                                // Optically centers the dot against the 11pt text baseline.
+                                style={{ marginTop: 1 }}
                             />
                             <Text style={{
                                 fontSize: 11,
@@ -559,43 +600,120 @@ const AgentInputStatusRow = React.memo(function AgentInputStatusRow(p: StatusRow
                         )}
                     </>
                 )}
-                {p.contextWarning && (
-                    <Text style={{
-                        fontSize: 11,
-                        color: p.contextWarning.color,
-                        marginLeft: p.connectionStatus ? 8 : 0,
-                        ...Typography.default()
-                    }}>
-                        {p.connectionStatus ? '• ' : ''}{p.contextWarning.text}
-                    </Text>
-                )}
             </View>
-            {showPermissionBadge && (() => {
-                const presentationKind = p.permissionSemanticKind ?? p.permissionModeKey;
-                const permColor = p.isSandboxedYoloMode ? '#4169E1' :
-                    presentationKind === 'acceptEdits' ? theme.colors.permission.acceptEdits :
-                        presentationKind === 'bypassPermissions' ? theme.colors.permission.bypass :
-                            presentationKind === 'plan' ? theme.colors.permission.plan :
-                                presentationKind === 'read-only' ? theme.colors.permission.readOnly :
-                                    presentationKind === 'safe-yolo' ? theme.colors.permission.safeYolo :
-                                        presentationKind === 'yolo' ? theme.colors.permission.yolo :
-                                            theme.colors.textSecondary;
-                const permIcon: 'play-forward' | 'pause' =
-                    presentationKind === 'plan' || presentationKind === 'read-only'
-                        ? 'pause' : 'play-forward';
-                return (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name={permIcon} size={11} color={permColor} />
-                        <Text style={{
-                            fontSize: 11,
-                            color: permColor,
-                            ...Typography.default()
-                        }}>
-                            {p.permissionLabel}
-                        </Text>
-                    </View>
-                );
-            })()}
+        </View>
+    );
+});
+
+// Grayscale ring that fills and darkens with context usage — reads at a
+// glance without color, sized to sit beside the 11pt status text.
+function ContextGaugeIcon(props: { percent: number }) {
+    const { theme } = useUnistyles();
+    const size = 14;
+    const strokeWidth = 2.5;
+    const radius = (size - strokeWidth) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const progress = Math.min(100, Math.max(0, props.percent));
+    const intensity = 0.35 + 0.65 * (progress / 100);
+    const color = theme.dark
+        ? `rgba(255, 255, 255, ${intensity})`
+        : `rgba(0, 0, 0, ${intensity})`;
+    return (
+        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+            <Circle
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                stroke={theme.colors.divider}
+                strokeWidth={strokeWidth}
+                fill="none"
+            />
+            <Circle
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                stroke={color}
+                strokeWidth={strokeWidth}
+                strokeLinecap="round"
+                fill="none"
+                strokeDasharray={`${circumference} ${circumference}`}
+                strokeDashoffset={circumference * (1 - progress / 100)}
+                rotation="-90"
+                originX={size / 2}
+                originY={size / 2}
+            />
+        </Svg>
+    );
+}
+
+type UsageRowProps = {
+    contextStatus: { percent: number; detailText: string; color: string } | null;
+    weekPercent: number | null;
+    /** Prebuilt "Session — 32% · resets 6 PM" rows for the week popup. */
+    usageMenuOptions: NativeSettingsMenuOption[];
+};
+
+// Sits under the composer card, right-aligned with the effort label: week
+// quota (tap for the session/week detail popup) and the context gauge (tap
+// to swap the percent for exact token counts).
+const AgentInputUsageRow = React.memo(function AgentInputUsageRow(p: UsageRowProps) {
+    const { theme } = useUnistyles();
+    const [showPreciseContext, setShowPreciseContext] = React.useState(false);
+    if (!p.contextStatus && p.weekPercent == null) {
+        return null;
+    }
+    const weekText = p.weekPercent != null ? (
+        <Text style={{ fontSize: 11, color: theme.colors.textSecondary, ...Typography.default() }}>
+            {t('agentInput.context.percentWeek', { percent: Math.round(p.weekPercent) })}
+        </Text>
+    ) : null;
+    return (
+        <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 10,
+            // 18 = 10pt shell inset + 8pt action inset: lines the gauge up
+            // with the effort label's right edge.
+            paddingHorizontal: 18,
+            paddingTop: 6,
+            minHeight: 18,
+        }}>
+            {weekText && (
+                p.usageMenuOptions.length > 0 ? (
+                    <NativeSettingsMenu
+                        anchor="bottom"
+                        groups={[{
+                            key: 'usage',
+                            label: '',
+                            title: '',
+                            options: p.usageMenuOptions,
+                            selectedKey: null,
+                            onSelect: () => { },
+                        }]}
+                    >
+                        {/* Native menu triggers hit only their own bounds, so
+                            pad the target out and pull the layout back in. */}
+                        <View style={{ padding: 10, margin: -10 }}>
+                            {weekText}
+                        </View>
+                    </NativeSettingsMenu>
+                ) : weekText
+            )}
+            {p.contextStatus && (
+                <Pressable
+                    onPress={() => setShowPreciseContext((current) => !current)}
+                    hitSlop={{ top: 12, bottom: 14, left: 10, right: 14 }}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
+                >
+                    <Text style={{ fontSize: 11, color: p.contextStatus.color, ...Typography.default() }}>
+                        {showPreciseContext
+                            ? p.contextStatus.detailText
+                            : t('agentInput.context.percentContext', { percent: p.contextStatus.percent })}
+                    </Text>
+                    <ContextGaugeIcon percent={p.contextStatus.percent} />
+                </Pressable>
+            )}
         </View>
     );
 });
@@ -685,14 +803,15 @@ const AgentInputContextChips = React.memo(function AgentInputContextChips(p: Con
 export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, AgentInputProps>((props, ref) => {
     const styles = stylesheet;
     const { theme } = useUnistyles();
-    const screenWidth = useWindowDimensions().width;
+    const { width: screenWidth } = useLayoutDimensions();
     // The compact action row is deliberately limited to the narrow native
     // layout. Desktop web, Mac Catalyst, and tablet-width canvases retain the
     // existing composer affordances rather than inheriting it.
     const runningOnMac = isRunningOnMac();
     const compactMobileComposer = Platform.OS !== 'web' && !runningOnMac && screenWidth <= 700;
-    const useNativeSettingsMenus = compactMobileComposer
-        || shouldUseExpoNativeSettingsMenu(Platform.OS, runningOnMac);
+    // Android uses the composer's React Native popup because Expo's Compose
+    // menu trigger can be measured at 0x0 before React Native lays it out.
+    const useNativeSettingsMenus = shouldUseExpoNativeSettingsMenu(Platform.OS, runningOnMac);
     const activeSendIconColor = compactMobileComposer ? '#0084FF' : theme.colors.button.primary.tint;
     const isSendBlocked = props.blockSend ?? false;
 
@@ -713,12 +832,19 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         props.permissionMode ? hackMode(props.permissionMode) : null
     ), [props.permissionMode]);
     const permissionModeKey = displayPermissionMode?.key ?? 'default';
+    // The chip is one word; the sandbox qualifier stays on the menu options and
+    // the status badge, which both have room to spell it out.
+    const permissionShortLabel = getPermissionModeShortLabel(displayPermissionMode);
     const availableModes = React.useMemo(() => (
         hackModes(props.availableModes ?? [])
     ), [props.availableModes]);
     const availableModels = props.availableModels ?? [];
+    const availableModelProviderGroups = React.useMemo(
+        () => groupModelModesByProvider(availableModels),
+        [availableModels],
+    );
     const availableEffortLevels = props.availableEffortLevels ?? [];
-    const modelLabel = props.modelMode?.name ?? t('agentInput.model.title');
+    const modelLabel = truncateModelLabel(props.modelMode?.name ?? t('agentInput.model.title'));
     const effortLabel = props.effortLevel?.name;
     const canOpenModelPicker = availableModels.length > 0 && !!props.onModelModeChange;
     const canOpenEffortPicker = availableEffortLevels.length > 0 && !!props.onEffortLevelChange;
@@ -746,10 +872,37 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         return label;
     }, [isSandboxEnabled]);
 
-    // Calculate context warning
-    const contextWarning = props.usageData?.contextSize
-        ? getContextWarning(props.usageData.contextSize, props.alwaysShowContextSize ?? false, theme, props.usageData.contextWindow)
+    // Usage row under the card: week quota + context gauge
+    const usageLimitShowRemaining = useSetting('usageLimitShowRemaining');
+    const contextStatus = props.usageData?.contextSize
+        ? getContextStatus(props.usageData.contextSize, props.alwaysShowContextSize ?? false, theme, props.usageData.contextWindow)
         : null;
+    // Only Session and Week are user-meaningful; provider-internal windows
+    // (nimbus_quill and friends) stay out of the popup.
+    const usageRows = React.useMemo(() => {
+        const rows = getUsageLimitRows(props.sessionStatusUsageLimits ?? null);
+        const session = rows.find((row) => row.id === 'five_hour') ?? null;
+        const week = rows.find((row) => row.id === 'seven_day') ?? null;
+        return { session, week };
+    }, [props.sessionStatusUsageLimits]);
+    const weekPercent = usageRows.week?.utilization != null && (props.alwaysShowContextSize || contextStatus != null)
+        ? getUsageLimitDisplayPercentage(usageRows.week.utilization, usageLimitShowRemaining)
+        : null;
+    const usageMenuOptions = React.useMemo<NativeSettingsMenuOption[]>(() => {
+        const options: NativeSettingsMenuOption[] = [];
+        const push = (key: string, label: string, row: { utilization: number | null; resetsAt: number | null } | null) => {
+            if (!row || row.utilization == null) return;
+            const percent = getUsageLimitDisplayPercentage(row.utilization, usageLimitShowRemaining);
+            // The newline renders as a second line inside the native menu row.
+            const reset = row.resetsAt != null
+                ? `\n${t('agentInput.usagePopup.resets', { time: formatUsageLimitResetTime(row.resetsAt) })}`
+                : '';
+            options.push({ key, label: `${label} · ${Math.round(percent)}%${reset}` });
+        };
+        push('session', t('agentInput.usagePopup.session'), usageRows.session);
+        push('week', t('agentInput.usagePopup.week'), usageRows.week);
+        return options;
+    }, [usageRows, usageLimitShowRemaining]);
 
     const agentInputEnterToSend = useSetting('agentInputEnterToSend');
     const keyboardShortcutsEnabled = useSetting('keyboardShortcutsEnabled');
@@ -762,6 +915,8 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     const shakerRef = React.useRef<ShakeInstance>(null);
     const sendBlockShakerRef = React.useRef<ShakeInstance>(null);
     const inputRef = React.useRef<MultiTextInputHandle>(null);
+    // The box around the text input; on web the View ref is its DOM node.
+    const composerRef = React.useRef<View>(null);
     const primaryAction = resolveAgentInputPrimaryAction({
         hasComposerContent,
         isSendBlocked,
@@ -803,16 +958,36 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     React.useEffect(() => {
         if (Platform.OS !== 'web' || !props.onAddImages) return;
 
-        const handlePaste = async (e: ClipboardEvent) => {
-            // Only handle pastes targeted at a focused text-editable element.
-            // The listener is attached to document, so without this guard a
-            // paste in the URL bar, another modal, or any focused-elsewhere
-            // input would steal images intended for somewhere else.
+        // The listeners live on document and several composers can be mounted
+        // at once (stacked session screens, side chats), so each one has to
+        // decide whether an event is its own — otherwise one paste/drop lands
+        // in every mounted composer.
+        const composerNode = () => composerRef.current as unknown as HTMLElement | null;
+        const node = composerNode();
+        if (node) mountedComposerNodes.add(node);
+
+        const isEditable = (element: Element | null) => element instanceof HTMLInputElement
+            || element instanceof HTMLTextAreaElement
+            || (element instanceof HTMLElement && element.isContentEditable);
+        const isEditableTarget = (target: EventTarget | null) => {
+            if (!(target instanceof Element)) return false;
+            return isEditable(target)
+                || !!target.closest('input,textarea,[contenteditable="true"]');
+        };
+        const ownsFocus = () => {
+            const currentNode = composerNode();
             const active = document.activeElement;
-            const isEditableTarget = active instanceof HTMLInputElement
-                || active instanceof HTMLTextAreaElement
-                || (active instanceof HTMLElement && active.isContentEditable);
-            if (!isEditableTarget) return;
+            return !!currentNode
+                && currentNode.getClientRects().length > 0
+                && isEditable(active)
+                && currentNode.contains(active);
+        };
+
+        const handlePaste = async (e: ClipboardEvent) => {
+            // Only a paste into this composer's own input. Without the guard a
+            // paste in the URL bar, a modal, or a sibling composer's input
+            // would steal images intended for somewhere else.
+            if (!ownsFocus()) return;
 
             const { getImagesFromClipboard, fileToAttachmentPreview } = await import('@/utils/pasteImages.web');
             const files = getImagesFromClipboard(e);
@@ -851,6 +1026,34 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         const handleDrop = async (e: DragEvent) => {
             if (!isFileDrag(e)) return;
             e.preventDefault();
+            // The drop is ours when it lands on this visible composer, when
+            // this composer owns the focus, or when no editable is focused and
+            // this is the only visible composer. With multiple visible side
+            // chats an untargeted drop is intentionally ignored; the
+            // mounted-node registry still routes targeted drops to the sibling
+            // they landed on.
+            const currentNode = composerNode();
+            const target = e.target;
+            const targetComposer = target instanceof Node
+                ? [...mountedComposerNodes].find((candidate) => candidate.contains(target))
+                : undefined;
+            const visibleComposers = [...mountedComposerNodes]
+                .filter((candidate) => candidate.getClientRects().length > 0);
+            const targetIsThisComposer = !!currentNode
+                && targetComposer === currentNode
+                && currentNode.getClientRects().length > 0;
+            const targetIsAnotherComposer = !!targetComposer && targetComposer !== currentNode;
+            const targetIsOutsideEditable = isEditableTarget(target) && !targetIsThisComposer;
+            const takesDrop = !targetIsAnotherComposer
+                && !targetIsOutsideEditable
+                && (targetIsThisComposer
+                    || ownsFocus()
+                    || (!isEditable(document.activeElement)
+                        && !!currentNode
+                        && visibleComposers.length === 1
+                        && visibleComposers[0] === currentNode));
+            if (!takesDrop || claimedDropEvents.has(e)) return;
+            claimedDropEvents.add(e);
             const { getImagesFromDrop, fileToAttachmentPreview } = await import('@/utils/pasteImages.web');
             const files = getImagesFromDrop(e);
             if (!files.length) return;
@@ -869,6 +1072,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         document.addEventListener('dragover', handleDragOver);
         document.addEventListener('drop', handleDrop);
         return () => {
+            if (node) mountedComposerNodes.delete(node);
             document.removeEventListener('paste', handlePaste as any);
             document.removeEventListener('dragover', handleDragOver);
             document.removeEventListener('drop', handleDrop);
@@ -882,6 +1086,11 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         text: props.initialValue,
         selection: { start: props.initialValue.length, end: props.initialValue.length }
     }));
+
+    const onActionAreaOffsetChange = props.onActionAreaOffsetChange;
+    const handleActionAreaLayout = React.useCallback((event: LayoutChangeEvent) => {
+        onActionAreaOffsetChange?.(CONTAINER_TOP_PADDING + event.nativeEvent.layout.y);
+    }, [onActionAreaOffsetChange]);
 
     const onChangeTextProp = props.onChangeText;
     const handleTextChange = React.useCallback((text: string) => {
@@ -1111,7 +1320,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
             systemImage: 'shield',
             options: availableModes.map((mode) => ({
                 key: mode.key,
-                label: withSandboxSuffix(mode.name, mode.key),
+                label: withSandboxSuffix(getPermissionModeMenuLabel(mode), mode.key),
                 disabled: mode.disabled,
             })),
             selectedKey: permissionModeKey,
@@ -1125,20 +1334,20 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     const modelSettingsGroups = React.useMemo<NativeSettingsMenuGroup[]>(() => {
         const groups: NativeSettingsMenuGroup[] = [];
         if (availableModels.length > 0 && props.onModelModeChange) {
-            groups.push({
-                key: 'model',
+            groups.push(...groupModelModesByProvider(availableModels).map((providerGroup) => ({
+                key: `model:${providerGroup.key}`,
                 label: props.modelMode?.name ?? t('agentInput.model.title'),
-                title: t('agentInput.model.title'),
+                title: providerGroup.title ?? t('agentInput.model.title'),
                 systemImage: 'cube',
-                options: availableModels.map((model) => ({ key: model.key, label: model.name, disabled: model.disabled })),
+                options: providerGroup.models.map((model) => ({ key: model.key, label: model.name, disabled: model.disabled })),
                 selectedKey: props.modelMode?.key,
-                onSelect: (key) => {
-                    const model = availableModels.find((candidate) => candidate.key === key);
+                onSelect: (key: string) => {
+                    const model = providerGroup.models.find((candidate) => candidate.key === key);
                     if (!model) return;
                     hapticsLight();
                     props.onModelModeChange?.(model);
                 },
-            });
+            })));
         }
         if (availableEffortLevels.length > 0 && props.onEffortLevelChange) {
             groups.push({
@@ -1159,7 +1368,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         return groups;
     }, [availableEffortLevels, availableModels, props.effortLevel?.key, props.modelMode?.key, props.onEffortLevelChange, props.onModelModeChange]);
 
-    const modelSettingsGroup = modelSettingsGroups.find((group) => group.key === 'model');
+    const modelProviderSettingsGroups = modelSettingsGroups.filter((group) => group.key.startsWith('model:'));
     const effortSettingsGroup = modelSettingsGroups.find((group) => group.key === 'effort');
 
     const renderModelValue = () => (
@@ -1173,6 +1382,17 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
             {effortLabel ?? t('agentInput.effort.title')}
         </Text>
     );
+
+    // A session started in a mode this build no longer offers resolves to no
+    // mode at all. Falling back to the shield keeps the picker reachable rather
+    // than inventing a word for a state we cannot name.
+    const renderPermissionValue = () => (permissionShortLabel ? (
+        <Text style={styles.mobileModeText} numberOfLines={1}>
+            {permissionShortLabel}
+        </Text>
+    ) : (
+        <Ionicons name="shield-outline" size={18} color={theme.colors.text} />
+    ));
 
     // Handle keyboard navigation
     const handleKeyPress = React.useCallback((event: KeyPressEvent): boolean => {
@@ -1359,7 +1579,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             </Shaker>
                         )}
 
-                        <GitStatusButton sessionId={props.sessionId} onPress={props.onFileViewerPress} />
+                        <FileViewerButton sessionId={props.sessionId} onPress={props.onFileViewerPress} />
 
                         {props.onPickImages && (
                             <Pressable
@@ -1508,21 +1728,6 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 { paddingHorizontal: screenWidth > 700 ? 0 : 8 },
             ]}>
                 <FloatingOverlay maxHeight={400} keyboardShouldPersistTaps="always">
-                    {props.showSessionStatusInfoInSettings ? (
-                        <>
-                            <View style={styles.settingsStatusInfo}>
-                                <SessionStatusBar
-                                    gitBranch={props.sessionStatusGitBranch}
-                                    modelLabel={props.sessionStatusModelLabel ?? null}
-                                    effortLabel={props.sessionStatusEffortLabel ?? null}
-                                    contextSize={props.usageData?.contextSize}
-                                    contextWindow={props.usageData?.contextWindow}
-                                />
-                            </View>
-                            <View style={{ height: 1, backgroundColor: theme.colors.divider, marginHorizontal: 16 }} />
-                        </>
-                    ) : null}
-
                     <View style={styles.overlaySection}>
                         <Text style={styles.overlaySectionTitle}>
                             {isCodex
@@ -1656,21 +1861,6 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             { paddingHorizontal: screenWidth > 700 ? 0 : 16 }
                         ]}>
                             <FloatingOverlay maxHeight={400} keyboardShouldPersistTaps="always">
-                                {props.showSessionStatusInfoInSettings ? (
-                                    <>
-                                        <View style={styles.settingsStatusInfo}>
-                                            <SessionStatusBar
-                                                gitBranch={props.sessionStatusGitBranch}
-                                                modelLabel={props.sessionStatusModelLabel ?? null}
-                                                effortLabel={props.sessionStatusEffortLabel ?? null}
-                                                contextSize={props.usageData?.contextSize}
-                                                contextWindow={props.usageData?.contextWindow}
-                                            />
-                                        </View>
-                                        <View style={styles.overlayDivider} />
-                                    </>
-                                ) : null}
-
                                 {openPicker === 'permission' ? (
                                     <View style={styles.overlaySection}>
                                         <Text style={styles.overlaySectionTitle}>
@@ -1751,12 +1941,15 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     <>
                                         {openPicker === 'model' && (
                                         <View style={styles.overlaySection}>
-                                            <Text style={styles.overlaySectionTitle}>
-                                                {props.modelMode?.name ?? t('agentInput.model.title')}
-                                            </Text>
-                                            {availableModels.length > 0 ? availableModels.map((model) => {
-                                                const isSelected = props.modelMode?.key === model.key;
-                                                return (
+                                            <Text style={styles.overlaySectionTitle}>{t('agentInput.model.title')}</Text>
+                                            {availableModels.length > 0 ? availableModelProviderGroups.map((providerGroup) => (
+                                                <View key={providerGroup.key}>
+                                                    {providerGroup.title ? (
+                                                        <Text style={styles.overlaySectionTitle}>{providerGroup.title}</Text>
+                                                    ) : null}
+                                                    {providerGroup.models.map((model) => {
+                                                        const isSelected = props.modelMode?.key === model.key;
+                                                        return (
                                                     <BubblePressable
                                                         key={model.key}
                                                         disabled={!props.onModelModeChange || model.disabled}
@@ -1830,8 +2023,10 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                                             )}
                                                         </View>
                                                     </BubblePressable>
-                                                );
-                                            }) : (
+                                                        );
+                                                    })}
+                                                </View>
+                                            )) : (
                                                 <Text style={{
                                                     fontSize: 13,
                                                     color: theme.colors.textSecondary,
@@ -1921,30 +2116,21 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                     </>
                 )}
 
-                {props.showStatusDetails !== false && (
-                    <>
-                        <AgentInputStatusRow
-                            connectionStatus={props.connectionStatus}
-                            contextWarning={contextWarning}
-                            displayPermissionMode={displayPermissionMode}
-                            permissionModeKey={permissionModeKey}
-                            permissionSemanticKind={displayPermissionMode?.semanticKind}
-                            isSandboxedYoloMode={isSandboxedYoloMode}
-                            permissionLabel={displayPermissionMode ? withSandboxSuffix(displayPermissionMode.name, permissionModeKey) : null}
-                            zenMode={props.zenMode}
-                        />
+                <AnimatedFade visible={props.showStatusDetails !== false}>
+                    <AgentInputStatusRow
+                        connectionStatus={props.connectionStatus}
+                    />
 
-                        <AgentInputContextChips
-                            machineName={props.machineName}
-                            onMachineClick={props.onMachineClick}
-                            currentPath={props.currentPath}
-                            onPathClick={props.onPathClick}
-                        />
-                    </>
-                )}
+                    <AgentInputContextChips
+                        machineName={props.machineName}
+                        onMachineClick={props.onMachineClick}
+                        currentPath={props.currentPath}
+                        onPathClick={props.onPathClick}
+                    />
+                </AnimatedFade>
 
                 {/* Box 2: Action Area (Input + Send) */}
-                <Shaker ref={sendBlockShakerRef}>
+                <Shaker ref={sendBlockShakerRef} onLayout={handleActionAreaLayout}>
                     <View style={[
                         compactMobileComposer && styles.unifiedPanelShadow,
                         compactMobileComposer && styles.mobileUnifiedPanelShadow,
@@ -1967,13 +2153,14 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                         />
                     )}
                     {/* Input field */}
-                    <View style={[
+                    <View ref={composerRef} style={[
                         styles.inputContainer,
                         compactMobileComposer && styles.mobileInputContainer,
                         props.minHeight ? { minHeight: props.minHeight } : undefined,
                     ]}>
                         <MultiTextInput
                             ref={inputRef}
+                            editable={props.editable ?? true}
                             defaultValue={props.initialValue}
                             paddingTop={compactMobileComposer
                                 ? MOBILE_COMPOSER_METRICS.inputPaddingTop
@@ -2015,30 +2202,42 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             </BubblePressable>
                         )}
 
+                        {/* Every chip lives in this one box, and send is the
+                            box's sibling: the box is handed the width left
+                            over and nothing inside can reach past it. */}
+                        <View style={styles.mobileActionMiddle}>
+                        {/* Named in words rather than hidden behind a gear: the
+                            permission mode is the one control here that changes
+                            what the agent may do to the machine. Matches the
+                            same chip in the Home composer. */}
                         {!props.zenMode && permissionSettingsGroups.length > 0 && (
                             useNativeSettingsMenus ? (
                                 <NativeSettingsMenu
                                     accessibilityLabel={permissionSettingsGroups[0]?.label}
                                     groups={permissionSettingsGroups}
                                     flat
-                                    triggerSystemImage="gearshape"
-                                    style={styles.mobileIconMenuFrame}
+                                    triggerLabel={permissionShortLabel ?? undefined}
+                                    triggerSystemImage={permissionShortLabel ? undefined : 'shield'}
+                                    // Centered to agree with the React Native
+                                    // chip underneath, which sizes the frame.
+                                    triggerAlignment="center"
+                                    style={styles.mobilePermissionMenuFrame}
                                 >
-                                    <View style={styles.mobileIconMenuContent}>
-                                        <Ionicons name="settings-outline" size={20} color="#0084FF" />
+                                    <View style={styles.mobilePermissionMenuContent}>
+                                        {renderPermissionValue()}
                                     </View>
                                 </NativeSettingsMenu>
                             ) : (
                                 <BubblePressable
                                     onPress={handleSettingsPress}
                                     hitSlop={6}
-                                    style={styles.mobileIconButton}
+                                    style={styles.mobilePermissionButton}
                                     accessibilityRole="button"
                                     accessibilityLabel={isCodex
                                         ? t('agentInput.codexPermissionMode.title')
                                         : t('agentInput.permissionMode.title')}
                                 >
-                                    <Ionicons name="settings-outline" size={20} color="#0084FF" />
+                                    {renderPermissionValue()}
                                 </BubblePressable>
                             )
                         )}
@@ -2049,11 +2248,10 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                     sits against the send button and the pair does
                                     not drift when either label changes width. */}
                                 <View style={{ flex: 1 }} />
-                                {useNativeSettingsMenus && modelSettingsGroup ? (
+                                {useNativeSettingsMenus && modelProviderSettingsGroups.length > 0 ? (
                                     <NativeSettingsMenu
                                         accessibilityLabel={t('agentInput.model.title')}
-                                        groups={[modelSettingsGroup]}
-                                        flat
+                                        groups={modelProviderSettingsGroups}
                                         triggerLabel={modelLabel}
                                         triggerAlignment="trailing"
                                         style={styles.mobileModelMenuFrame}
@@ -2117,6 +2315,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                 )}
                             </>
                         ) : <View style={{ flex: 1 }} />}
+                        </View>
 
                         {!compactMobileComposer && props.agentType && props.onAgentClick && (
                             <BubblePressable
@@ -2134,7 +2333,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                         )}
 
                         {!compactMobileComposer && (
-                            <GitStatusButton sessionId={props.sessionId} onPress={props.onFileViewerPress} />
+                            <FileViewerButton sessionId={props.sessionId} onPress={props.onFileViewerPress} />
                         )}
 
                         <Shaker ref={shakerRef}>
@@ -2221,15 +2420,21 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                         </MobileGlassSurface>
                     </View>
                 </Shaker>
+
+                <AnimatedFade visible={props.showStatusDetails !== false}>
+                    <AgentInputUsageRow
+                        contextStatus={contextStatus}
+                        weekPercent={weekPercent}
+                        usageMenuOptions={usageMenuOptions}
+                    />
+                </AnimatedFade>
             </View>
         </View>
     );
 }));
 
-// Git Status Button Component
-function GitStatusButton({ sessionId, onPress }: { sessionId?: string, onPress?: () => void }) {
-    const hasMeaningfulGitStatus = useHasMeaningfulGitStatus(sessionId || '');
-    const styles = stylesheet;
+// Keep file browsing available without duplicating the header's git statistics.
+function FileViewerButton({ sessionId, onPress }: { sessionId?: string, onPress?: () => void }) {
     const { theme } = useUnistyles();
 
     if (!sessionId || !onPress) {
@@ -2250,20 +2455,14 @@ function GitStatusButton({ sessionId, onPress }: { sessionId?: string, onPress?:
                 overflow: 'hidden',
             })}
             hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.files')}
             onPress={() => {
                 hapticsLight();
                 onPress?.();
             }}
         >
-            {hasMeaningfulGitStatus ? (
-                <GitStatusBadge sessionId={sessionId} />
-            ) : (
-                <Octicons
-                    name="git-branch"
-                    size={16}
-                    color={theme.colors.button.secondary.tint}
-                />
-            )}
+            <Octicons name="file-directory" size={16} color={theme.colors.button.secondary.tint} />
         </BubblePressable>
     );
 }

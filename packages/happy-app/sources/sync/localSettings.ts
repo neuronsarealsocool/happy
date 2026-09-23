@@ -26,6 +26,10 @@ export const LocalSettingsSchema = z.object({
     // Legacy local-only conversation pictures. Kept as a migration/fallback for
     // installs that saved pictures before they moved into synced settings.
     sessionProfilePictures: z.record(z.string(), z.string()).describe('Custom profile picture data URLs per session'),
+    // Projects showing every workspace rather than the first few - keyed by project id
+    expandedProjects: z.record(z.string(), z.boolean()).describe('Projects showing all workspaces instead of the first few'),
+    // Boxes ticked on the "Link your computer" checklist - keyed by step id
+    linkComputerChecklist: z.record(z.string(), z.boolean()).describe('Ticked steps on the link-your-computer checklist'),
 });
 
 //
@@ -56,6 +60,8 @@ export const localSettingsDefaults: LocalSettings = {
     acknowledgedCliVersions: {},
     collapsedProjects: {},
     sessionProfilePictures: {},
+    expandedProjects: {},
+    linkComputerChecklist: {},
 };
 Object.freeze(localSettingsDefaults);
 

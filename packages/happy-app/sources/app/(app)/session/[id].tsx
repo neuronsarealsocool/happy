@@ -39,5 +39,8 @@ export default React.memo(() => {
         storage.getState().updateSessionDraft(sessionId, draft);
     }, [params.chatHeadDraft, params.chatHeadNonce, params.chatHeadSend, sessionId]);
 
-    return (<SessionView id={sessionId} />);
+    // The web session route is singular (see useNavigateToSession): a hop to
+    // another session reuses the route key and only swaps params, so key the
+    // view on the id to remount the session-local state.
+    return (<SessionView key={sessionId} id={sessionId} />);
 });

@@ -12,7 +12,11 @@ import { deriveKey } from '@/utils/deriveKey';
 import { RpcHandlerManager } from './rpc/RpcHandlerManager';
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers';
 import { calculateCost } from '@/utils/pricing';
-import { shouldReconnect } from '@/utils/lidState';
+import {
+    releaseReconnectCapabilityMonitor,
+    retainReconnectCapabilityMonitor,
+    shouldReconnect,
+} from '@/utils/lidState';
 import { createEnvelope, type CreateEnvelopeOptions, type SessionEnvelope, type SessionTurnEndStatus } from '@slopus/happy-wire';
 import {
     closeClaudeTurnWithStatus,
@@ -211,6 +215,8 @@ export class ApiSessionClient extends EventEmitter {
     private encryptionKey: Uint8Array;
     private encryptionVariant: 'legacy' | 'dataKey';
     private reconnectInterval: NodeJS.Timeout | null = null;
+    private reconnectTimeout: NodeJS.Timeout | null = null;
+    private closed = false;
     private ignoreArchiveSignal = false;
     private skipInitialMessages = false;
     private claudeSessionProtocolState: ClaudeSessionProtocolState = {
@@ -224,10 +230,22 @@ export class ApiSessionClient extends EventEmitter {
         startedSubagents: new Set<string>(),
         activeSubagents: new Set<string>(),
     };
-    private lastSeq = 0;
+    /**
+     * How far this client has consumed the session's message log.
+     *
+     * A session has one seq counter and both sides draw from it, so this must
+     * only ever move over messages actually routed. It used to also be advanced
+     * by this client's own POST responses, which silently dropped inbound
+     * messages: a prompt sent by the app at seq 1 was skipped whenever the CLI's
+     * own startup event took seq 2 and its POST returned first, because the
+     * cursor then sat at 2 and both the socket's contiguity check and the next
+     * fetch's after_seq looked straight past seq 1.
+     */
+    private lastReceivedSeq = 0;
     private pendingOutbox: Array<{ content: string; localId: string }> = [];
     private readonly sendSync: InvalidateSync;
     private readonly receiveSync: InvalidateSync;
+    private reconnectCapabilityHeld = false;
 
     constructor(token: string, session: Session) {
         super()
@@ -274,11 +292,12 @@ export class ApiSessionClient extends EventEmitter {
         //
 
         this.socket.on('connect', () => {
-            logger.debug('Socket connected successfully');
-            if (this.reconnectInterval) {
-                clearInterval(this.reconnectInterval);
-                this.reconnectInterval = null;
+            if (this.closed) {
+                this.socket.close();
+                return;
             }
+            logger.debug('Socket connected successfully');
+            this.clearReconnectTimers();
             this.rpcHandlerManager.onSocketConnect(this.socket);
             this.receiveSync.invalidate();
         })
@@ -291,12 +310,14 @@ export class ApiSessionClient extends EventEmitter {
         this.socket.on('disconnect', (reason) => {
             logger.debug(`[API] Socket disconnected: ${reason}`);
             this.rpcHandlerManager.onSocketDisconnect();
+            if (this.closed) return;
             this.startSmartReconnect();
         })
 
         this.socket.on('connect_error', (error) => {
             logger.debug('[API] Socket connection error:', error);
             this.rpcHandlerManager.onSocketDisconnect();
+            if (this.closed) return;
             this.startSmartReconnect();
         })
 
@@ -312,7 +333,7 @@ export class ApiSessionClient extends EventEmitter {
 
                 if (data.body.t === 'new-message') {
                     const messageSeq = data.body.message?.seq;
-                    if (typeof messageSeq !== 'number' || messageSeq !== this.lastSeq + 1 || data.body.message.content.t !== 'encrypted') {
+                    if (typeof messageSeq !== 'number' || messageSeq !== this.lastReceivedSeq + 1 || data.body.message.content.t !== 'encrypted') {
                         this.receiveSync.invalidate();
                         return;
                     }
@@ -326,7 +347,7 @@ export class ApiSessionClient extends EventEmitter {
                             : 'unknown',
                     });
                     this.routeIncomingMessage(body);
-                    this.lastSeq = messageSeq;
+                    this.lastReceivedSeq = messageSeq;
                 } else if (data.body.t === 'update-session') {
                     if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
                         this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
@@ -368,6 +389,8 @@ export class ApiSessionClient extends EventEmitter {
         // Connect (after short delay to give a time to add handlers)
         //
 
+        retainReconnectCapabilityMonitor();
+        this.reconnectCapabilityHeld = true;
         this.socket.connect();
     }
 
@@ -579,14 +602,14 @@ export class ApiSessionClient extends EventEmitter {
     }
 
     private async fetchMessages() {
-        // On reconnect, skip processing existing messages — just advance lastSeq
+        // On reconnect, skip processing existing messages — just advance the cursor
         const skipRouting = this.skipInitialMessages;
         if (skipRouting) {
             this.skipInitialMessages = false;
-            logger.debug('[API] Reconnect mode: skipping existing messages, advancing lastSeq');
+            logger.debug('[API] Reconnect mode: skipping existing messages, advancing lastReceivedSeq');
         }
 
-        let afterSeq = this.lastSeq;
+        let afterSeq = this.lastReceivedSeq;
         while (true) {
             const response = await axios.get<V3GetSessionMessagesResponse>(
                 `${configuration.serverUrl}/v3/sessions/${encodeURIComponent(this.sessionId)}/messages`,
@@ -626,7 +649,7 @@ export class ApiSessionClient extends EventEmitter {
                 }
             }
 
-            this.lastSeq = Math.max(this.lastSeq, maxSeq);
+            this.lastReceivedSeq = Math.max(this.lastReceivedSeq, maxSeq);
             const hasMore = !!response.data.hasMore;
             if (hasMore && maxSeq === afterSeq) {
                 logger.debug('[API] fetchMessages pagination stalled, stopping to avoid infinite loop', {
@@ -663,11 +686,12 @@ export class ApiSessionClient extends EventEmitter {
                 }
             );
 
-            const messages = Array.isArray(response.data.messages) ? response.data.messages : [];
-            const maxSeq = messages.reduce((acc, message) => (
-                message.seq > acc ? message.seq : acc
-            ), this.lastSeq);
-            this.lastSeq = maxSeq;
+            // Deliberately does not touch the receive cursor. The seqs this
+            // response reports are ours, and moving the cursor onto them steps
+            // over anything the other side wrote in between — which is exactly
+            // how a new session lost the first prompt. Our own messages come
+            // back over the socket like everyone else's and move the cursor
+            // then, once they have actually been seen.
             this.pendingOutbox.splice(batchStart, batch.length);
         }
     }
@@ -991,23 +1015,25 @@ export class ApiSessionClient extends EventEmitter {
     }
 
     async close() {
+        if (this.closed) return;
+        this.closed = true;
         logger.debug('[API] socket.close() called');
         this.sendSync.stop();
         this.receiveSync.stop();
-        if (this.reconnectInterval) {
-            clearInterval(this.reconnectInterval);
-            this.reconnectInterval = null;
-        }
+        this.clearReconnectTimers();
         this.socket.close();
+        if (this.reconnectCapabilityHeld) {
+            releaseReconnectCapabilityMonitor();
+            this.reconnectCapabilityHeld = false;
+        }
     }
 
     private startSmartReconnect() {
-        if (this.reconnectInterval) return;
+        if (this.closed || this.reconnectInterval) return;
 
         this.reconnectInterval = setInterval(() => {
-            if (this.socket.connected) {
-                clearInterval(this.reconnectInterval!);
-                this.reconnectInterval = null;
+            if (this.closed || this.socket.connected) {
+                this.clearReconnectTimers();
                 return;
             }
             if (!shouldReconnect()) {
@@ -1019,8 +1045,22 @@ export class ApiSessionClient extends EventEmitter {
         }, 3000);
 
         if (shouldReconnect()) {
-            logger.debug('[API] Network up + lid open — reconnecting in 1s');
-            setTimeout(() => { if (!this.socket.connected) this.socket.connect() }, 1000);
+            logger.debug('[API] Network available — reconnecting in 1s');
+            this.reconnectTimeout = setTimeout(() => {
+                this.reconnectTimeout = null;
+                if (!this.closed && !this.socket.connected && shouldReconnect()) this.socket.connect();
+            }, 1000);
+        }
+    }
+
+    private clearReconnectTimers() {
+        if (this.reconnectInterval) {
+            clearInterval(this.reconnectInterval);
+            this.reconnectInterval = null;
+        }
+        if (this.reconnectTimeout) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = null;
         }
     }
 }

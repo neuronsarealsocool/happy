@@ -90,6 +90,7 @@ export const MessageView = React.memo((props: {
   message: Message;
   metadata: Metadata | null;
   sessionId: string;
+  copyText?: string;
   getMessageById?: (id: string) => Message | null;
 }) => {
   return (

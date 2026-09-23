@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { DropdownMenu, DropdownMenuItem } from '@expo/ui/jetpack-compose';
+import { DropdownMenu, DropdownMenuItem, Text as ComposeText } from '@expo/ui/jetpack-compose';
 import type { NativeOptionsPickerProps } from './NativeOptionsPicker';
 
 export function NativeOptionsPicker({
-    options,
+    sections,
     selectedKey,
     onSelect,
     children,
@@ -11,13 +11,32 @@ export function NativeOptionsPicker({
     return (
         <DropdownMenu>
             <DropdownMenu.Items>
-                {options.map((option) => (
-                    <DropdownMenuItem key={option.key} onClick={() => onSelect(option.key)}>
-                        <DropdownMenuItem.Text>
-                            {option.key === selectedKey ? `✓ ${option.label}` : option.label}
-                        </DropdownMenuItem.Text>
-                    </DropdownMenuItem>
-                ))}
+                {sections.flatMap((section) => [
+                    // Compose menus have no section headers, so a heading is a
+                    // row that cannot be chosen.
+                    ...(section.title ? [(
+                        <DropdownMenuItem key={`${section.key}:title`} enabled={false} onClick={() => {}}>
+                            <DropdownMenuItem.Text>
+                                <ComposeText>{section.title}</ComposeText>
+                            </DropdownMenuItem.Text>
+                        </DropdownMenuItem>
+                    )] : []),
+                    ...section.options.map((option) => (
+                        <DropdownMenuItem
+                            key={`${section.key}:${option.key}`}
+                            enabled={option.disabled !== true}
+                            onClick={() => onSelect(option.key)}
+                        >
+                            {/* Native slot view: a bare string child throws "Text strings
+                                must be rendered within a <Text> component" mid-render. */}
+                            <DropdownMenuItem.Text>
+                                <ComposeText>
+                                    {!option.action && option.key === selectedKey ? `✓ ${option.label}` : option.label}
+                                </ComposeText>
+                            </DropdownMenuItem.Text>
+                        </DropdownMenuItem>
+                    )),
+                ])}
             </DropdownMenu.Items>
             <DropdownMenu.Trigger>{children}</DropdownMenu.Trigger>
         </DropdownMenu>

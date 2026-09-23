@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import { apiSocket, getCurrentAppState, getHappyClientId } from '@/sync/apiSocket';
 import { notifyUnreadMessage } from '@/sync/webTabTitle';
 import { AuthCredentials } from '@/auth/tokenStorage';
@@ -8,6 +9,7 @@ import { storage } from './storage';
 // Circular at module level (ops.ts imports sync) but safe: both sides only
 // touch each other's exports at runtime, never during module initialization.
 import { sessionSetAgentModes } from './ops';
+import { rigComposerClear } from './rigComposer';
 import { getImageAttachmentSendPlan, isAttachmentAllowedByPolicy } from './attachmentSupport';
 import {
     errorMessageFromUnknown,
@@ -18,6 +20,7 @@ import { ApiEphemeralUpdateSchema, ApiMessage, ApiUpdateContainerSchema } from '
 import type { ApiEphemeralActivityUpdate } from './apiTypes';
 import { Session, Machine } from './storageTypes';
 import { InvalidateSync } from '@/utils/sync';
+import { delay } from '@/utils/time';
 import { ActivityUpdateAccumulator } from './reducer/activityUpdateAccumulator';
 import { randomUUID } from 'expo-crypto';
 import * as Notifications from 'expo-notifications';
@@ -68,7 +71,7 @@ export type SessionReconnectData = {
     metadata: NonNullable<Session['metadata']>;
 };
 import { resolveControlHandoffDirection } from './controlHandoff';
-import { resolveMessageModeMeta } from './messageMeta';
+import { resolveMessageDeliveryMeta, resolveMessageModeMeta, UnsupportedPermissionModeError } from './messageMeta';
 import type { AttachmentPreview, UploadedAttachment } from './attachmentTypes';
 import { requestAttachmentUpload, uploadEncryptedBlob } from './apiAttachments';
 import { encryptBlob } from '@/encryption/blob';
@@ -78,6 +81,15 @@ import { t } from '@/text';
 import { isRigMetadataV1, rigCanUseAttachments, usesControlledSessionUi } from './rig';
 import { cacheAndroidChatHeadSession } from '@/utils/androidChatHeads';
 import { getSessionName } from '@/utils/sessionUtils';
+import { fetchProjects as fetchProjectRecords } from './apiProjects';
+import { decryptProjectRecord, loadProjectAvatar, type DecryptedProjectRecord } from './projects';
+import type { Project, ProjectAvatar } from './projectTypes';
+import { SessionMessagePreloader } from './sessionMessagePreloader';
+import { messagePlanMode } from './messagePlanMode';
+import { loadSessionAvatar } from './sessionAvatars';
+import { SessionAvatarHydrator } from './SessionAvatarHydrator';
+import { sessionAvatarDescriptorSchema, sessionAvatarRevisionSchema, sameSessionAvatar } from './sessionAvatarTypes';
+import { releaseSpawnedSession } from './spawnRequestId';
 
 type V3GetSessionMessagesResponse = {
     messages: ApiMessage[];
@@ -102,6 +114,7 @@ type V3PostSessionMessagesResponse = {
 };
 
 type OutboxMessage = {
+    kind: 'user' | 'attachment';
     localId: string;
     content: string;
 };
@@ -113,7 +126,29 @@ type SendMessageOptions = {
     attachments?: AttachmentPreview[];
     /** Let a caller flush the outbox directly instead of using the retry queue. */
     deferFlush?: boolean;
+    /** Wait until the outbox reaches the server before resolving. */
+    awaitDelivery?: boolean;
+    /** Cancel before outbox acceptance; queued messages are not recalled. */
+    signal?: AbortSignal;
+    /** Synchronous commit notification, before a caller can cancel its UI flow. */
+    onAccepted?: () => void;
+    /** Re-check the composer's destination after asynchronous preparation. */
+    isCurrent?: () => boolean;
 };
+
+function sameBytes(a: Uint8Array | null | undefined, b: Uint8Array | null): boolean {
+    if (a === undefined) return false;
+    if (a === null || b === null) return a === b;
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < b.length; index += 1) {
+        if (a[index] !== b[index]) return false;
+    }
+    return true;
+}
+
+function avatarDescriptorKey(descriptor: NonNullable<DecryptedProjectRecord['avatar']>): string {
+    return `${descriptor.ref}:${descriptor.version}`;
+}
 
 class Sync {
     private static readonly BACKGROUND_SEND_TIMEOUT_MS = 30_000;
@@ -123,7 +158,13 @@ class Sync {
     private credentials!: AuthCredentials;
     public encryptionCache = new EncryptionCache();
     private sessionsSync: InvalidateSync;
+    private projectsSync: InvalidateSync;
     private messagesSync = new Map<string, InvalidateSync>();
+    private messagePreloader = new SessionMessagePreloader((sessionId, signal) => this.preloadLatestPage(sessionId, signal));
+    private historyPrefetchSessions = new Set<string>();
+    private olderMessagesPrefetching = new Set<string>();
+    private olderMessagesPrefetchAttempts = new Map<string, number>();
+    private preloadedPlanModes = new Map<string, Session['permissionMode']>();
     private sendSync = new Map<string, InvalidateSync>();
     private sendAbortControllers = new Map<string, AbortController>();
     private sessionLastSeq = new Map<string, number>();
@@ -139,6 +180,23 @@ class Sync {
     private sessionDataKeys = new Map<string, Uint8Array>(); // Store session data encryption keys internally
     private machineDataKeys = new Map<string, Uint8Array>(); // Store machine data encryption keys internally
     private artifactDataKeys = new Map<string, Uint8Array>(); // Store artifact data encryption keys internally
+    // Project data keys are account secrets and remain private to Sync. They
+    // are intentionally never copied into Zustand or row/display data.
+    private projectDataKeys = new Map<string, Uint8Array | null>();
+    private readonly sessionAvatars = new SessionAvatarHydrator({
+        read: (id) => storage.getState().sessions[id],
+        load: async (id, descriptor, signal) => this.credentials
+            ? await loadSessionAvatar(this.credentials, this.encryption, id, descriptor, signal)
+            : null,
+        publish: (id, avatar) => {
+            const session = storage.getState().sessions[id];
+            if (session) storage.getState().applySessions([{ ...session, avatar }]);
+        },
+    });
+    private projectAvatarCache = new Map<string, ProjectAvatar>();
+    private projectAvatarInFlight = new Map<string, Promise<ProjectAvatar | null>>();
+    private projectAvatarDescriptors = new Map<string, string>();
+    private projectAvatarGenerations = new Map<string, number>();
     private settingsSync: InvalidateSync;
     private profileSync: InvalidateSync;
     private purchasesSync: InvalidateSync;
@@ -163,6 +221,7 @@ class Sync {
 
     constructor() {
         this.sessionsSync = new InvalidateSync(this.fetchSessions);
+        this.projectsSync = new InvalidateSync(this.fetchProjects);
         this.settingsSync = new InvalidateSync(this.syncSettings);
         this.profileSync = new InvalidateSync(this.fetchProfile);
         this.purchasesSync = new InvalidateSync(this.syncPurchases);
@@ -212,6 +271,20 @@ class Sync {
                 this.friendsSync.invalidate();
                 this.friendRequestsSync.invalidate();
                 this.feedSync.invalidate();
+
+                // Refresh the open chat's message log on resume. While the app is
+                // backgrounded the data socket is suspended/dropped, so any messages
+                // the agent produced while away arrive with no live `update` to apply
+                // them. The invalidations above only refresh the session LIST, not the
+                // viewing session's messages — without this the visible chat stays
+                // stale until the user leaves and re-enters it (it only re-fetches on a
+                // fresh SessionView mount). getMessagesSync does a bounded forward sync;
+                // if the socket hasn't reconnected yet, InvalidateSync's backoff retries
+                // until it has.
+                const resumeViewingSessionId = storage.getState().currentViewingSessionId;
+                if (resumeViewingSessionId) {
+                    this.onSessionVisible(resumeViewingSessionId);
+                }
             } else {
                 log.log(`📱 App state changed to: ${nextAppState}`);
                 this.maybeStartBackgroundSendWatchdog();
@@ -233,6 +306,7 @@ class Sync {
     }
 
     async create(credentials: AuthCredentials, encryption: Encryption) {
+        this.sessionAvatars.clear();
         this.credentials = credentials;
         this.encryption = encryption;
         this.anonID = encryption.anonID;
@@ -250,6 +324,7 @@ class Sync {
     }
 
     async restore(credentials: AuthCredentials, encryption: Encryption) {
+        this.sessionAvatars.clear();
         // NOTE: No awaiting anything here, we're restoring from a disk (ie app restarted)
         // Purchases sync is invalidated in #init() and will complete asynchronously
         this.credentials = credentials;
@@ -311,16 +386,67 @@ class Sync {
 
 
     onSessionVisible = (sessionId: string) => {
-        this.getMessagesSync(sessionId).invalidate();
+        releaseSpawnedSession(sessionId);
+        this.historyPrefetchSessions.add(sessionId);
+        this.refreshSessionData(sessionId);
+        // Also cover focus arriving while the speculative first page is still
+        // being decrypted. Revalidate first so a newer ExitPlanMode can cancel
+        // the deferred transition before activation consumes it once.
+        void this.getMessagesSync(sessionId).awaitQueue().then(() => this.activatePreloadedPlanMode(sessionId));
 
-        // Also invalidate git status sync for this session
-        gitStatusSync.getSync(sessionId).invalidate();
+        this.notifyVoiceSessionFocus(sessionId);
+    }
 
-        // Notify voice assistant about session visibility
+    private notifyVoiceSessionFocus = (sessionId: string) => {
         const session = storage.getState().sessions[sessionId];
         if (session) {
             voiceHooks.onSessionFocus(sessionId, session.metadata || undefined);
         }
+    }
+
+    private refreshSessionData = (sessionId: string) => {
+        this.getMessagesSync(sessionId).invalidate();
+
+        // Also invalidate git status sync for this session
+        gitStatusSync.getSync(sessionId).invalidate();
+    }
+
+    private onSessionDataUpdated = (sessionId: string) => {
+        this.refreshSessionData(sessionId);
+        // Preserve existing voice-follow behavior for actual server events.
+        // Unlike a user visit, these must not opt a session into full history.
+        this.notifyVoiceSessionFocus(sessionId);
+    }
+
+    preloadSession = (sessionId: string) => {
+        this.messagePreloader.preload(sessionId);
+    }
+
+    private activatePreloadedPlanMode = (sessionId: string) => {
+        if (!this.preloadedPlanModes.has(sessionId)) return;
+        const previousMode = this.preloadedPlanModes.get(sessionId);
+        this.preloadedPlanModes.delete(sessionId);
+        const session = storage.getState().sessions[sessionId];
+        // Do not replay history over a mode chosen since the preload.
+        if (session && session.permissionMode === previousMode) {
+            sessionSetAgentModes(sessionId, { permissionMode: 'plan' });
+        }
+    }
+
+    private preloadLatestPage = async (sessionId: string, signal: AbortSignal): Promise<boolean> => {
+        const lock = this.getSessionMessageLock(sessionId);
+        return lock.inLock(async () => {
+            // Recheck inside the shared lock: normal sync or a previous touch
+            // may have already populated the cache while this request waited.
+            const encryption = this.encryption?.getSessionEncryption(sessionId);
+            if (signal.aborted || !encryption || !storage.getState().sessions[sessionId]
+                || this.sessionLastSeq.has(sessionId)) {
+                return false;
+            }
+            await this.fetchInitialLatestPage(sessionId, encryption, signal);
+            storage.getState().applyMessagesLoaded(sessionId);
+            return true;
+        });
     }
 
     private getMessagesSync(sessionId: string): InvalidateSync {
@@ -592,33 +718,68 @@ class Sync {
         return { uploaded, failed };
     }
 
-    async sendMessage(sessionId: string, text: string, options?: SendMessageOptions) {
+    /**
+     * Puts one in-memory blob in a session's attachment store, encrypted with the
+     * session's blob key, and returns the ref the agent can download it by. This is
+     * the message-attachment path without the file read: a bot face painted on the
+     * phone travels the same way as a picture attached to a message.
+     */
+    async uploadSessionBlob(sessionId: string, name: string, bytes: Uint8Array): Promise<{ ref: string; size: number }> {
+        if (!this.credentials) throw new Error('Not signed in.');
+        const blobKey = this.encryption.getSessionBlobKey(sessionId);
+        if (!blobKey) throw new Error(`No blob key for session ${sessionId}`);
+        const encrypted = encryptBlob(bytes, blobKey);
+        const upload = await requestAttachmentUpload(this.credentials, sessionId, name, encrypted.length);
+        await uploadEncryptedBlob(upload, encrypted, this.credentials);
+        return { ref: upload.ref, size: bytes.length };
+    }
 
-        // Get encryption — may not be ready yet if sessions are still syncing
-        let encryption = this.encryption.getSessionEncryption(sessionId);
-        if (!encryption) {
-            // Wait for sessions sync to complete (initializes encryption keys)
-            await this.sessionsSync.awaitQueue();
-            encryption = this.encryption.getSessionEncryption(sessionId);
-            if (!encryption) {
-                console.error(`Session ${sessionId} not found after sync`);
-                return;
-            }
+    /** A visible row alone is not enough to place a message safely. */
+    async ensureSessionReady(sessionId: string): Promise<void> {
+        const isReady = () => !!(storage.getState().sessions[sessionId]?.metadata
+            && this.encryption.getSessionEncryption(sessionId)
+            && this.encryption.getSessionBlobKey(sessionId));
+        for (let attempt = 0; !isReady() && attempt < 3; attempt++) {
+            if (attempt > 0) await delay(300 * attempt);
+            // The shared sync retries network failures indefinitely. Keep the
+            // existing send budget, and require both the row and its own key.
+            await Promise.race([this.sessionsSync.invalidateAndAwait(), delay(4000)]);
         }
-
-        // Get session data from storage
-        let session = storage.getState().sessions[sessionId];
-        if (!session) {
-            await this.sessionsSync.awaitQueue();
-            session = storage.getState().sessions[sessionId];
-            if (!session) {
-                console.error(`Session ${sessionId} not found in storage after sync`);
-                return;
-            }
+        if (!isReady()) {
+            throw new Error('The message was not sent: this session has not finished syncing. Please try again.');
         }
+    }
 
-        const modeMeta = resolveMessageModeMeta(session, storage.getState().settings);
-        const { displayText, source = 'chat', attachments, deferFlush = false } = options ?? {};
+    /** True means accepted into the outbox, not necessarily delivered to the agent. */
+    async sendMessage(sessionId: string, text: string, options?: SendMessageOptions): Promise<boolean> {
+        const accountEncryption = this.encryption;
+        const canSend = () => !options?.signal?.aborted && this.encryption === accountEncryption
+            && (options?.isCurrent?.() ?? true);
+        if (!canSend()) return false;
+        try {
+            await this.ensureSessionReady(sessionId);
+        } catch (error) {
+            if (!canSend()) return false;
+            Modal.alert(t('common.error'), error instanceof Error ? error.message : 'Failed to sync session');
+            return false;
+        }
+        if (!canSend()) return false;
+        const encryption = this.encryption.getSessionEncryption(sessionId)!;
+        const session = storage.getState().sessions[sessionId];
+
+        let modeMeta: ReturnType<typeof resolveMessageModeMeta>;
+        try {
+            modeMeta = resolveMessageModeMeta(session, storage.getState().settings);
+        } catch (error) {
+            if (error instanceof UnsupportedPermissionModeError) {
+                // Refuse loudly instead of substituting a mode: swapping in a
+                // default would silently change what the agent may do.
+                Modal.alert(t('common.error'), error.message);
+                return false;
+            }
+            throw error;
+        }
+        const { displayText, source = 'chat', attachments, awaitDelivery = false, deferFlush = false } = options ?? {};
 
         const flavor = session.metadata?.flavor;
         const rigAttachmentPolicy = isRigMetadataV1(session.metadata)
@@ -647,11 +808,13 @@ class Sync {
                 [{ text: t('common.ok'), style: 'cancel' }],
             );
             if (!attachmentPlan.shouldSendText || (!text.trim() && (effectiveAttachments?.length ?? 0) === 0)) {
-                return;
+                return false;
             }
         }
 
-        // Upload attachments and queue file events before the text message.
+        // Stage all records first. Cancellation/encryption failure must not
+        // leave file events in the outbox for a retry to send twice.
+        const stagedAttachments: { pending: OutboxMessage; normalized: NormalizedMessage | null }[] = [];
         if (effectiveAttachments && effectiveAttachments.length > 0) {
             const { uploaded, failed } = await this.uploadAttachmentsForSession(sessionId, effectiveAttachments);
 
@@ -664,12 +827,6 @@ class Sync {
             }
 
             if (uploaded.length > 0) {
-                let pending = this.pendingOutbox.get(sessionId);
-                if (!pending) {
-                    pending = [];
-                    this.pendingOutbox.set(sessionId, pending);
-                }
-
                 for (const att of uploaded) {
                     const fileRecord: RawRecord = {
                         role: 'session',
@@ -707,10 +864,10 @@ class Sync {
                     const encryptedFileRecord = await encryption.encryptRawRecord(fileRecord);
                     const fileLocalId = randomUUID();
                     const fileNormalized = normalizeRawMessage(fileLocalId, fileLocalId, Date.now(), fileRecord);
-                    if (fileNormalized) {
-                        this.enqueueMessages(sessionId, [fileNormalized]);
-                    }
-                    pending.push({ localId: fileLocalId, content: encryptedFileRecord });
+                    stagedAttachments.push({
+                        pending: { kind: 'attachment', localId: fileLocalId, content: encryptedFileRecord },
+                        normalized: fileNormalized,
+                    });
                 }
             }
         }
@@ -735,6 +892,15 @@ class Sync {
             sentFrom = 'web'; // fallback
         }
 
+        // Capture after attachment uploads: the previous turn may have finished
+        // while uploading. Persist this so echoes and remounts keep the same UI.
+        const sendingSession = storage.getState().sessions[sessionId];
+        if (!canSend() || !sendingSession) return false;
+        const hasPendingUserMessage = this.pendingOutbox.get(sessionId)?.some(message => message.kind === 'user') === true
+            || storage.getState().sessionMessages[sessionId]?.messages.some(
+                message => message.kind === 'user-text' && message.pending === true,
+            ) === true;
+
         // Create user message content with metadata
         const content: RawRecord = {
             role: 'user',
@@ -744,15 +910,27 @@ class Sync {
             },
             meta: {
                 sentFrom,
+                ...resolveMessageDeliveryMeta(sendingSession, source === 'new_session', hasPendingUserMessage),
                 appendSystemPrompt: systemPrompt,
                 ...(modeMeta.permissionMode !== undefined ? { permissionMode: modeMeta.permissionMode } : {}),
                 ...(modeMeta.model !== undefined ? { model: modeMeta.model } : {}),
                 ...(modeMeta.modelProviderId !== undefined ? { modelProviderId: modeMeta.modelProviderId } : {}),
                 ...(modeMeta.effort !== undefined ? { effort: modeMeta.effort } : {}),
+                ...(modeMeta.serviceTier !== undefined ? { serviceTier: modeMeta.serviceTier } : {}),
                 ...(displayText && { displayText }) // Add displayText if provided
             }
         };
         const encryptedRawRecord = await encryption.encryptRawRecord(content);
+
+        // No await between this check and acceptance. A navigation, account
+        // change, deletion, or Stop must never redirect or replay this send.
+        if (!canSend()
+            || !storage.getState().sessions[sessionId]
+            || this.encryption.getSessionEncryption(sessionId) !== encryption) return false;
+
+        for (const attachment of stagedAttachments) {
+            if (attachment.normalized) this.enqueueMessages(sessionId, [attachment.normalized]);
+        }
 
         // Add to messages - normalize the raw record
         const createdAt = Date.now();
@@ -766,20 +944,38 @@ class Sync {
             pending = [];
             this.pendingOutbox.set(sessionId, pending);
         }
-        pending.push({
+        pending.push(...stagedAttachments.map(attachment => attachment.pending), {
+            kind: 'user',
             localId,
             content: encryptedRawRecord
         });
+        releaseSpawnedSession(sessionId);
+        // The synced Happy Agent draft is spent once its text is accepted. The
+        // mode was captured above, before the clear. Text typed since (a newer
+        // local edit) stays; the composer clears itself only when unchanged.
+        const latestSession = storage.getState().sessions[sessionId];
+        if (isRigMetadataV1(latestSession?.metadata) && source !== 'voice'
+            && latestSession.draftUpdatedAt === session.draftUpdatedAt
+            && (!latestSession.draft || latestSession.draft === text)) {
+            rigComposerClear(sessionId);
+        }
+        options?.onAccepted?.();
         trackMessageSent(source, session.metadata);
 
         // Stamp local activity time so the (opt-in) activity sort bubbles this session
         // up on user action only — not on background agent output.
         storage.getState().markSessionMessageSent(sessionId);
 
-        if (!deferFlush) {
-            this.getSendSync(sessionId).invalidate();
-            this.maybeStartBackgroundSendWatchdog();
+        if (deferFlush) {
+            return true;
         }
+        if (awaitDelivery) {
+            await this.getSendSync(sessionId).invalidateAndAwait();
+        } else {
+            this.getSendSync(sessionId).invalidate();
+        }
+        this.maybeStartBackgroundSendWatchdog();
+        return true;
     }
 
     async sendChatHeadMessage(sessionId: string, text: string, attachments?: AttachmentPreview[]) {
@@ -824,14 +1020,26 @@ class Sync {
 
         await this.prepareMachineForChatHead(machineId);
         const modeMeta = resolveMessageModeMeta(session, storage.getState().settings);
+        const reconnect = this.getSessionReconnectData(sessionId);
+        const fallback = reconnect?.encryptionVariant === 'dataKey'
+            ? {
+                metadata: reconnect.metadata,
+                metadataVersion: reconnect.metadataVersion,
+                agentStateVersion: reconnect.agentStateVersion,
+                seq: reconnect.seq,
+                encryptionKey: reconnect.encryptionKey,
+                encryptionVariant: reconnect.encryptionVariant,
+            }
+            : undefined;
         const result = await apiSocket.machineRPC<
             { type: string; errorMessage?: string },
-            { sessionId: string; model?: string; permissionMode?: string; reconnect?: SessionReconnectData }
+            { sessionId: string; model?: string; permissionMode?: string; fallback?: unknown; fallbackReason?: string }
         >(machineId, 'resume-happy-session', {
             sessionId,
             model: modeMeta.model ?? undefined,
             permissionMode: modeMeta.permissionMode,
-            reconnect: this.getSessionReconnectData(sessionId),
+            fallback,
+            fallbackReason: fallback ? 'ok' : 'chat-head-client-has-no-data-key',
         });
         if (result.type !== 'success') {
             throw new Error(result.errorMessage || `Failed to resume chat-head session ${sessionId}`);
@@ -1115,8 +1323,135 @@ class Sync {
     // Private
     //
 
+    private clearProjectAvatarCache(projectId: string): void {
+        const prefix = `${projectId}:`;
+        for (const key of this.projectAvatarCache.keys()) {
+            if (key.startsWith(prefix)) this.projectAvatarCache.delete(key);
+        }
+        for (const key of this.projectAvatarInFlight.keys()) {
+            if (key.startsWith(prefix)) this.projectAvatarInFlight.delete(key);
+        }
+        this.projectAvatarGenerations.set(
+            projectId,
+            (this.projectAvatarGenerations.get(projectId) ?? 0) + 1,
+        );
+    }
+
+    private hydrateProjectAvatar = async (record: DecryptedProjectRecord): Promise<void> => {
+        const descriptor = record.avatar;
+        if (!descriptor || !this.credentials) return;
+
+        const projectId = record.project.id;
+        const cacheKey = `${projectId}:${avatarDescriptorKey(descriptor)}`;
+        const generation = this.projectAvatarGenerations.get(projectId) ?? 0;
+        const cached = this.projectAvatarCache.get(cacheKey);
+        if (cached) {
+            storage.getState().applyProjectAvatar(projectId, cached);
+            return;
+        }
+
+        const existing = this.projectAvatarInFlight.get(cacheKey);
+        if (existing) {
+            await existing;
+            return;
+        }
+
+        let blobKey: Uint8Array;
+        try {
+            blobKey = await this.encryption.getProjectBlobKey(record.dataKey);
+        } catch {
+            return;
+        }
+        const request = loadProjectAvatar(
+            this.credentials,
+            projectId,
+            descriptor,
+            blobKey,
+        );
+        this.projectAvatarInFlight.set(cacheKey, request);
+
+        try {
+            const avatar = await request;
+            // A project/avatar event can arrive while the object URL is being
+            // downloaded. Do not let an old ciphertext win that race.
+            const currentKey = this.projectDataKeys.get(projectId);
+            const currentGeneration = this.projectAvatarGenerations.get(projectId) ?? 0;
+            if (!avatar || currentGeneration !== generation || !sameBytes(currentKey, record.dataKey)) {
+                return;
+            }
+
+            this.projectAvatarCache.set(cacheKey, avatar);
+            storage.getState().applyProjectAvatar(projectId, avatar);
+        } finally {
+            if (this.projectAvatarInFlight.get(cacheKey) === request) {
+                this.projectAvatarInFlight.delete(cacheKey);
+            }
+        }
+    };
+
+    private fetchProjects = async (): Promise<void> => {
+        if (!this.credentials) return;
+
+        const projectIds = [...new Set(Object.values(storage.getState().sessions)
+            .map((session) => session.projectId)
+            .filter((projectId): projectId is string => typeof projectId === 'string' && projectId.length > 0))];
+        const records = await fetchProjectRecords(this.credentials, projectIds);
+        const decryptedRecords = (await Promise.all(records.map(async (record) => {
+            try {
+                return await decryptProjectRecord(record, this.encryption);
+            } catch (error) {
+                console.error(`Failed to decrypt project ${record.id}:`, error);
+                return null;
+            }
+        }))).filter((record): record is DecryptedProjectRecord => record !== null);
+
+        const currentIds = new Set(decryptedRecords.map((record) => record.project.id));
+        for (const projectId of this.projectDataKeys.keys()) {
+            if (currentIds.has(projectId)) continue;
+            this.projectDataKeys.delete(projectId);
+            this.projectAvatarDescriptors.delete(projectId);
+            this.clearProjectAvatarCache(projectId);
+        }
+
+        const expectedAvatarCacheKeys = new Set<string>();
+        for (const record of decryptedRecords) {
+            const projectId = record.project.id;
+            const nextDescriptor = record.avatar ? avatarDescriptorKey(record.avatar) : null;
+            const previousDescriptor = this.projectAvatarDescriptors.get(projectId) ?? null;
+            if (previousDescriptor !== nextDescriptor) {
+                this.clearProjectAvatarCache(projectId);
+            }
+            if (nextDescriptor) {
+                this.projectAvatarDescriptors.set(projectId, nextDescriptor);
+                expectedAvatarCacheKeys.add(`${projectId}:${nextDescriptor}`);
+            } else {
+                this.projectAvatarDescriptors.delete(projectId);
+            }
+
+            const previousKey = this.projectDataKeys.get(projectId);
+            if (this.projectDataKeys.has(projectId) && !sameBytes(previousKey, record.dataKey)) {
+                this.clearProjectAvatarCache(projectId);
+            }
+            this.projectDataKeys.set(projectId, record.dataKey);
+        }
+
+        // The referenced project snapshot is authoritative. Discard entries
+        // for removed/changed descriptors before starting new downloads.
+        for (const cacheKey of this.projectAvatarCache.keys()) {
+            if (!expectedAvatarCacheKeys.has(cacheKey)) this.projectAvatarCache.delete(cacheKey);
+        }
+
+        storage.getState().applyProjects(decryptedRecords.map((record) => record.project), true);
+
+        // Artwork is deliberately hydrated after the encrypted catalog is
+        // visible. A failed avatar download leaves the project name usable and
+        // the Avatar component falls back to its brutalist identity.
+        await Promise.all(decryptedRecords.map((record) => this.hydrateProjectAvatar(record)));
+    };
+
     private fetchSessions = async () => {
         if (!this.credentials) return;
+        const avatarsBeforeFetch = storage.getState().sessions;
 
         const API_ENDPOINT = getServerUrl();
         const response = await fetch(`${API_ENDPOINT}/v1/sessions`, {
@@ -1141,6 +1476,9 @@ class Sync {
             agentState: string | null;
             agentStateVersion: number;
             dataEncryptionKey: string | null;
+            projectId?: string | null;
+            avatar?: unknown;
+            avatarVersion?: unknown;
             active: boolean;
             activeAt: number;
             createdAt: number;
@@ -1175,15 +1513,25 @@ class Sync {
             }
 
             // Decrypt metadata using session-specific encryption
-            let metadata = await sessionEncryption.decryptMetadata(session.metadataVersion, session.metadata);
-
-            // Decrypt agent state using session-specific encryption
-            let agentState = await sessionEncryption.decryptAgentState(session.agentStateVersion, session.agentState);
+            let metadata: Session['metadata'];
+            let agentState: Session['agentState'];
+            try {
+                metadata = await sessionEncryption.decryptMetadata(session.metadataVersion, session.metadata);
+                agentState = await sessionEncryption.decryptAgentState(session.agentStateVersion, session.agentState);
+            } catch {
+                // One malformed record must not prevent every valid session
+                // (including a just-created one) from becoming visible.
+                console.error(`Failed to decrypt session ${session.id}`);
+                continue;
+            }
 
             // Put it all together. Thinking placeholders are overwritten just
             // before applySessions below.
             const processedSession = {
                 ...session,
+                avatarDescriptor: sessionAvatarDescriptorSchema.safeParse(session.avatar).data ?? null,
+                avatarRevision: sessionAvatarRevisionSchema.safeParse(session.avatarVersion).data,
+                avatar: null,
                 thinking: false,
                 thinkingAt: 0,
                 metadata,
@@ -1207,11 +1555,25 @@ class Sync {
         const current = storage.getState().sessions;
         this.applySessions(decryptedSessions.map(s => ({
             ...s,
+            // A live replacement or removal received during this fetch wins over its snapshot.
+            ...((current[s.id]?.avatarRevision !== undefined && s.avatarRevision !== undefined
+                ? current[s.id].avatarRevision! > s.avatarRevision
+                : current[s.id]?.avatarUpdateSeq !== avatarsBeforeFetch[s.id]?.avatarUpdateSeq)
+                ? { avatarDescriptor: current[s.id]?.avatarDescriptor, avatar: current[s.id]?.avatar, avatarRevision: current[s.id]?.avatarRevision }
+                : { avatar: sameSessionAvatar(s.avatarDescriptor, current[s.id]?.avatarDescriptor) ? current[s.id]?.avatar ?? null : null }),
+            avatarUpdateSeq: current[s.id]?.avatarUpdateSeq,
             thinking: s.active ? (current[s.id]?.thinking ?? false) : false,
             thinkingAt: s.active ? (current[s.id]?.thinkingAt ?? 0) : 0,
         })));
+        this.projectsSync.invalidate();
         log.log(`📥 fetchSessions completed - processed ${decryptedSessions.length} sessions`);
-
+        // Machine-readable for scripts/perf-e2e.mjs, which deep-links through
+        // the most recent real sessions and reads [perf] timings off Metro.
+        const recent = [...decryptedSessions]
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+            .slice(0, 12)
+            .map((s) => s.id);
+        console.log(`[perf] recent-sessions ${recent.join(',')}`);
     }
 
     public refreshMachines = async () => {
@@ -2000,8 +2362,12 @@ class Sync {
                 console.log('RevenueCat initialized successfully');
             }
 
-            // Sync purchases
-            await RevenueCat.syncPurchases();
+            // Sync purchases. Skip on iOS simulator: syncPurchases posts the App
+            // Store receipt, and a missing receipt triggers SKReceiptRefreshRequest,
+            // which opens the Apple Account sign-in sheet on every app foreground.
+            if (!(Platform.OS === 'ios' && !Device.isDevice)) {
+                await RevenueCat.syncPurchases();
+            }
 
             // Fetch customer info
             const customerInfo = await RevenueCat.getCustomerInfo();
@@ -2010,8 +2376,9 @@ class Sync {
             storage.getState().applyPurchases(customerInfo);
 
         } catch (error) {
-            console.error('Failed to sync purchases:', error);
-            // Don't throw - purchases are optional
+            // console.log, not console.error: purchases are optional and a
+            // failure here must not raise the dev error overlay.
+            console.log('Failed to sync purchases:', error);
         }
     }
 
@@ -2053,14 +2420,18 @@ class Sync {
             const data = await response.json() as V3PostSessionMessagesResponse;
             pending.splice(0, batch.length);
             if (Array.isArray(data.messages) && data.messages.length > 0) {
-                const currentLastSeq = this.sessionLastSeq.get(sessionId) ?? 0;
-                let maxSeq = currentLastSeq;
-                for (const message of data.messages) {
-                    if (message.seq > maxSeq) {
-                        maxSeq = message.seq;
-                    }
+                // Join our local rows even if the socket echo is delayed or lost.
+                const userLocalIds = new Set(batch.filter((message) => message.kind === 'user').map((message) => message.localId));
+                const serverIdPairs = data.messages.flatMap((message) =>
+                    message.localId && userLocalIds.has(message.localId) ? [{ serverId: message.id, localId: message.localId }] : []);
+                if (serverIdPairs.length > 0) {
+                    storage.getState().applyUserMessageServerIds(sessionId, serverIdPairs);
                 }
-                this.sessionLastSeq.set(sessionId, maxSeq);
+
+                // An acknowledgement proves only that our messages were stored.
+                // Receipts or other participants' messages can precede them but
+                // remain unread. Only stream consumption may advance the cursor.
+                this.getMessagesSync(sessionId).invalidate();
             }
         } catch (error) {
             this.maybeStartBackgroundSendWatchdog();
@@ -2083,9 +2454,20 @@ class Sync {
     }
 
     private fetchMessages = async (sessionId: string) => {
+        // Take ownership before waiting. A touch on a different row must not
+        // abort the first page once ordinary sync needs it. No duplicate GET
+        // or second decryption when touch-up overlaps the speculative request.
+        const preload = this.messagePreloader.take(sessionId);
+        if (preload && await preload) {
+            void this.prefetchOlderMessagesInBackground(sessionId);
+            return;
+        }
+        // Deletion during a handed-off preload is not a transient fetch error.
+        if (!storage.getState().sessions[sessionId]) return;
         log.log(`💬 fetchMessages starting for session ${sessionId} - acquiring lock`);
         const lock = this.getSessionMessageLock(sessionId);
         await lock.inLock(async () => {
+            if (!storage.getState().sessions[sessionId]) return;
             const encryption = this.encryption.getSessionEncryption(sessionId);
             if (!encryption) {
                 log.log(`💬 fetchMessages: Session encryption not ready for ${sessionId}, will retry`);
@@ -2117,29 +2499,37 @@ class Sync {
             storage.getState().applyMessagesLoaded(sessionId);
             log.log(`💬 fetchMessages completed for session ${sessionId}`);
 
-            if (isInitialLoad) {
-                // Fire-and-forget. The chat is interactive at this point;
-                // background pages stream in without blocking either the
-                // surrounding lock or the UI. loadOlderMessages takes the
-                // same lock internally, so the loop naturally serialises
-                // with on-scroll triggers and live socket updates.
-                void this.prefetchOlderMessagesInBackground(sessionId);
-            }
+            // A preloaded first page may already be cached. History starts
+            // after an actual visit, regardless of who fetched that first page.
+            void this.prefetchOlderMessagesInBackground(sessionId);
         });
     }
 
     private prefetchOlderMessagesInBackground = async (sessionId: string) => {
+        if (!this.historyPrefetchSessions.has(sessionId) || this.olderMessagesPrefetching.has(sessionId)) return;
+        this.olderMessagesPrefetching.add(sessionId);
+        try {
+            await this.fetchOlderMessagesInBackground(sessionId);
+        } finally {
+            this.olderMessagesPrefetching.delete(sessionId);
+        }
+    }
+
+    private fetchOlderMessagesInBackground = async (sessionId: string) => {
         const SLEEP_BETWEEN_PAGES_MS = 250;
+        // Budget background work across visits/reconnects, not just this run.
+        // Scroll-back can still load older pages on demand without this cap.
+        const MAX_PREFETCH_ATTEMPTS = 5;
         // While loadOlderMessages handles the actual work, this loop is what
         // keeps it going without user input. We keep stepping until either:
+        //   - we hit the prefetch attempt budget (see above), or
         //   - the server says there is no more older history, or
-        //   - the session is no longer present in the store (user navigated
-        //     away and the session was unloaded), or
+        //   - the session's messages are no longer present in the store, or
         //   - we hit seq = 1 (the very first message), or
-        //   - the encryption key is gone (logged out).
+        //   - the encryption key is gone.
         // The loop yields between pages to keep the UI thread responsive
         // and to spread out server load.
-        while (true) {
+        while ((this.olderMessagesPrefetchAttempts.get(sessionId) ?? 0) < MAX_PREFETCH_ATTEMPTS) {
             const sessionMessages = storage.getState().sessionMessages[sessionId];
             if (!sessionMessages || !sessionMessages.hasMoreOlder) {
                 return;
@@ -2153,6 +2543,9 @@ class Sync {
             }
 
             try {
+                // Reserve attempts even on failure so repeated invalidations
+                // cannot restart unlimited speculative work.
+                this.olderMessagesPrefetchAttempts.set(sessionId, (this.olderMessagesPrefetchAttempts.get(sessionId) ?? 0) + 1);
                 await this.loadOlderMessages(sessionId);
             } catch (error) {
                 log.log(`💬 prefetchOlderMessagesInBackground: error for ${sessionId}, stopping: ${String(error)}`);
@@ -2165,10 +2558,12 @@ class Sync {
 
     private fetchInitialLatestPage = async (
         sessionId: string,
-        encryption: ReturnType<Encryption['getSessionEncryption']> & {}
+        encryption: ReturnType<Encryption['getSessionEncryption']> & {},
+        preloadSignal?: AbortSignal,
     ) => {
         const response = await apiSocket.request(
-            `/v3/sessions/${sessionId}/messages?before_seq=${SEQ_BACKWARD_INITIAL_SENTINEL}&limit=100`
+            `/v3/sessions/${sessionId}/messages?before_seq=${SEQ_BACKWARD_INITIAL_SENTINEL}&limit=100`,
+            { signal: preloadSignal },
         );
         if (!response.ok) {
             throw new Error(`Failed to fetch initial page for ${sessionId}: ${response.status}`);
@@ -2176,7 +2571,7 @@ class Sync {
         const data = await response.json() as V3GetSessionMessagesResponse;
         const messages = Array.isArray(data.messages) ? data.messages : [];
 
-        await this.applyFetchedMessages(sessionId, encryption, messages);
+        await this.applyFetchedMessages(sessionId, encryption, messages, preloadSignal);
 
         // Anchor both ends so future incremental forward sync resumes from
         // maxSeq, and loadOlderMessages can page backward from minSeq.
@@ -2190,6 +2585,8 @@ class Sync {
         if (messages.length > 0) {
             this.sessionOldestSeq.set(sessionId, minSeq);
         }
+        // Even a valid page can contain only non-rendering protocol records.
+        storage.getState().applyMessagesLoaded(sessionId);
         storage.getState().applyOlderMessagesPagination(sessionId, {
             hasMore: !!data.hasMore && messages.length > 0
         });
@@ -2229,10 +2626,19 @@ class Sync {
     private applyFetchedMessages = async (
         sessionId: string,
         encryption: ReturnType<Encryption['getSessionEncryption']> & {},
-        messages: ApiMessage[]
+        messages: ApiMessage[],
+        preloadSignal?: AbortSignal,
     ) => {
+        const assertPreloadActive = () => {
+            if (preloadSignal && (preloadSignal.aborted || !storage.getState().sessions[sessionId]
+                || this.encryption.getSessionEncryption(sessionId) !== encryption)) {
+                throw new Error('Session preload cancelled');
+            }
+        };
+        assertPreloadActive();
         if (messages.length === 0) return;
         const decryptedMessages = await encryption.decryptMessages(messages);
+        assertPreloadActive();
         const normalizedMessages: NormalizedMessage[] = [];
         for (let i = 0; i < decryptedMessages.length; i++) {
             const decrypted = decryptedMessages[i];
@@ -2243,7 +2649,10 @@ class Sync {
             }
         }
         if (normalizedMessages.length > 0) {
-            this.applyMessages(sessionId, normalizedMessages);
+            // Once the destination has focus this is an ordinary first page,
+            // including voice updates if the call began before it arrived.
+            const source = preloadSignal && storage.getState().currentViewingSessionId !== sessionId ? 'preload' : 'sync';
+            this.applyMessages(sessionId, normalizedMessages, source);
         }
     }
 
@@ -2253,31 +2662,36 @@ class Sync {
      * the currently loaded history. No-op when we have already fetched the
      * earliest message, when no initial fetch has happened yet, or when an
      * older-fetch is already in flight for this session.
+     * Resolves true only when the cursor moved back: callers that page
+     * automatically continue on true and rest on false.
      */
-    loadOlderMessages = async (sessionId: string) => {
+    loadOlderMessages = async (sessionId: string): Promise<boolean> => {
         const oldestSeq = this.sessionOldestSeq.get(sessionId);
         if (oldestSeq === undefined || oldestSeq <= 1) {
-            return;
+            return false;
         }
         const sessionMessages = storage.getState().sessionMessages[sessionId];
         if (!sessionMessages || sessionMessages.isLoadingOlder || !sessionMessages.hasMoreOlder) {
-            return;
+            return false;
         }
 
         storage.getState().applyOlderMessagesLoading(sessionId, true);
         const lock = this.getSessionMessageLock(sessionId);
         try {
-            await lock.inLock(async () => {
+            return await lock.inLock(async () => {
                 const encryption = this.encryption.getSessionEncryption(sessionId);
                 if (!encryption) {
+                    // Thrown, as fetchMessages does: a silent no-op leaves
+                    // hasMoreOlder set with nothing changed, and automatic
+                    // paging would ask again at once.
                     log.log(`💬 loadOlderMessages: encryption not ready for ${sessionId}`);
-                    return;
+                    throw new Error(`Session encryption not ready for ${sessionId}`);
                 }
                 // Re-read the cursor inside the lock. A concurrent
                 // socket-pushed update or reload could have changed it.
                 const beforeSeq = this.sessionOldestSeq.get(sessionId);
                 if (beforeSeq === undefined || beforeSeq <= 1) {
-                    return;
+                    return false;
                 }
                 const response = await apiSocket.request(
                     `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=100`
@@ -2294,12 +2708,16 @@ class Sync {
                 for (const message of messages) {
                     if (message.seq < minSeq) minSeq = message.seq;
                 }
-                if (messages.length > 0) {
+                // A page that does not move the cursor back would be refetched
+                // forever; treat it as the end of history.
+                const advanced = minSeq < beforeSeq;
+                if (advanced) {
                     this.sessionOldestSeq.set(sessionId, minSeq);
                 }
                 storage.getState().applyOlderMessagesPagination(sessionId, {
-                    hasMore: !!data.hasMore && messages.length > 0
+                    hasMore: !!data.hasMore && advanced
                 });
+                return advanced;
             });
         } finally {
             storage.getState().applyOlderMessagesLoading(sessionId, false);
@@ -2344,9 +2762,20 @@ class Sync {
             this.friendsSync.invalidate();
             this.friendRequestsSync.invalidate();
             this.feedSync.invalidate();
-            // Messages are fetched lazily per-session via onSessionVisible (called by SessionView
-            // when realtimeStatus changes). Session metadata + agentState (including permission
-            // requests) are already refreshed by sessionsSync.invalidate() above.
+            // Refresh the open chat's message log. The socket dropped (foreground
+            // network blip, server restart, or returning from background), so any
+            // messages produced during the gap were missed — there was no live
+            // `update` to apply them, and `connect` fired with recovered=false so
+            // socket.io did not replay them. sessionsSync above only refreshes the
+            // session list/metadata, not the viewing session's messages. (This used
+            // to rely on SessionView calling onSessionVisible "when realtimeStatus
+            // changes", but realtimeStatus tracks the voice session, not this data
+            // socket — see useSocketStatus vs useRealtimeStatus — so that trigger
+            // never fired on reconnect.)
+            const reconnectViewingSessionId = storage.getState().currentViewingSessionId;
+            if (reconnectViewingSessionId) {
+                this.onSessionVisible(reconnectViewingSessionId);
+            }
             for (const sync of this.sendSync.values()) {
                 sync.invalidate();
             }
@@ -2453,8 +2882,8 @@ class Sync {
                 }
             }
 
-            // Ping session
-            this.onSessionVisible(updateData.body.sid);
+            // A socket update refreshes data; it is not a user opening a chat.
+            this.onSessionDataUpdated(updateData.body.sid);
 
         } else if (updateData.body.t === 'new-session') {
             log.log('🆕 New session update received');
@@ -2462,6 +2891,7 @@ class Sync {
         } else if (updateData.body.t === 'delete-session') {
             log.log('🗑️ Delete session update received');
             const sessionId = updateData.body.sid;
+            this.sessionAvatars.cancel(sessionId);
 
             // Remove session from storage
             storage.getState().deleteSession(sessionId);
@@ -2471,6 +2901,10 @@ class Sync {
 
             // Clear any cached git status
             gitStatusSync.clearForSession(sessionId);
+            this.messagePreloader.cancel(sessionId);
+            this.historyPrefetchSessions.delete(sessionId);
+            this.olderMessagesPrefetchAttempts.delete(sessionId);
+            this.preloadedPlanModes.delete(sessionId);
             this.messagesSync.delete(sessionId);
             this.sendSync.delete(sessionId);
             this.pendingOutbox.delete(sessionId);
@@ -2479,6 +2913,7 @@ class Sync {
             this.sessionMessageLocks.delete(sessionId);
             this.sessionMessageQueue.delete(sessionId);
             this.sessionQueueProcessing.delete(sessionId);
+            this.projectsSync.invalidate();
 
             log.log(`🗑️ Session ${sessionId} deleted from local storage`);
         } else if (updateData.body.t === 'update-session') {
@@ -2508,8 +2943,22 @@ class Sync {
                     ? await sessionEncryption.decryptMetadata(updateData.body.metadata.version, updateData.body.metadata.value)
                     : session.metadata;
 
+                const nextProjectId = updateData.body.projectId !== undefined
+                    ? updateData.body.projectId
+                    : session.projectId;
+                const latestAvatar = storage.getState().sessions[session.id] ?? session;
+                const incomingAvatarRevision = updateData.body.avatarVersion ?? updateData.body.avatar?.version;
+                const avatarChanged = updateData.body.avatar !== undefined && (incomingAvatarRevision !== undefined && latestAvatar.avatarRevision !== undefined
+                    ? incomingAvatarRevision > latestAvatar.avatarRevision
+                    : updateData.seq > (latestAvatar.avatarUpdateSeq ?? -1));
+                if (updateData.body.avatar !== undefined && !avatarChanged && !updateData.body.metadata && !updateData.body.agentState && updateData.body.projectId === undefined) return;
+                const nextAvatarDescriptor = avatarChanged ? updateData.body.avatar : latestAvatar.avatarDescriptor;
                 this.applySessions([{
                     ...session,
+                    avatarDescriptor: nextAvatarDescriptor,
+                    avatar: sameSessionAvatar(nextAvatarDescriptor, latestAvatar.avatarDescriptor) ? latestAvatar.avatar : null,
+                    avatarUpdateSeq: avatarChanged ? updateData.seq : latestAvatar.avatarUpdateSeq,
+                    avatarRevision: avatarChanged ? incomingAvatarRevision : latestAvatar.avatarRevision,
                     agentState,
                     agentStateVersion: updateData.body.agentState
                         ? updateData.body.agentState.version
@@ -2518,9 +2967,11 @@ class Sync {
                     metadataVersion: updateData.body.metadata
                         ? updateData.body.metadata.version
                         : session.metadataVersion,
+                    projectId: nextProjectId,
                     updatedAt: updateData.createdAt,
                     seq: updateData.seq
                 }]);
+                if (nextProjectId !== session.projectId) this.projectsSync.invalidate();
 
                 // Invalidate git status when agent state changes (files may have been modified)
                 if (updateData.body.agentState) {
@@ -2544,9 +2995,21 @@ class Sync {
                     if (handoffDirection) {
                         const target = handoffDirection === 'desktop-to-mobile' ? 'mobile' : 'desktop';
                         log.log(`🔄 Control returned to ${target} for session ${updateData.body.id}, re-fetching messages`);
-                        this.onSessionVisible(updateData.body.id);
+                        this.onSessionDataUpdated(updateData.body.id);
                     }
                 }
+            }
+        } else if (
+            updateData.body.t === 'new-project'
+            || updateData.body.t === 'update-project'
+            || updateData.body.t === 'delete-project'
+        ) {
+            log.log(`📁 ${updateData.body.t} update received`);
+            // Project events only invalidate; the catalog endpoint is canonical.
+            this.projectsSync.invalidate();
+            if (updateData.body.t === 'delete-project') {
+                // Deletion also nulls the server-side session link.
+                this.sessionsSync.invalidate();
             }
         } else if (updateData.body.t === 'update-account') {
             const accountUpdate = updateData.body;
@@ -2949,11 +3412,33 @@ class Sync {
     // Apply store
     //
 
-    private applyMessages = (sessionId: string, messages: NormalizedMessage[]) => {
-        const result = storage.getState().applyMessages(sessionId, messages);
+    private applyMessages = (sessionId: string, messages: NormalizedMessage[], source: 'sync' | 'preload' = 'sync') => {
+        const planMode = messagePlanMode(messages);
+        if (planMode !== null) this.preloadedPlanModes.delete(sessionId);
+        const applyStarted = Date.now();
+        const result = storage.getState().applyMessages(sessionId, messages, source);
+        const applyElapsed = Date.now() - applyStarted;
+        if (applyElapsed > 8) {
+            const total = storage.getState().sessionMessages[sessionId]?.messages.length ?? 0;
+            console.log(`[perf] applyMessages ${sessionId} ${applyElapsed}ms batch=${messages.length} total=${total}`);
+        }
+        // History preparation is cache hydration, not a new agent event. It
+        // must not send voice prompts or change the agent's operating mode.
+        if (source === 'preload') {
+            if (result.enteredPlanMode) {
+                this.preloadedPlanModes.set(sessionId, storage.getState().sessions[sessionId]?.permissionMode);
+            }
+            return;
+        }
         const state = storage.getState();
+        // Settle-only changes re-render an existing row; announcing one to
+        // voice would repeat "User sent message" when its receipt arrives.
+        const settledOnly = new Set(result.settledMessageIds);
         let m: Message[] = [];
         for (let messageId of result.changed) {
+            if (settledOnly.has(messageId)) {
+                continue;
+            }
             const message = state.sessionMessages[sessionId]?.messagesMap[messageId];
             if (message) {
                 m.push(message);
@@ -2965,8 +3450,8 @@ class Sync {
             cacheAndroidChatHeadSession(
                 sessionId,
                 getSessionName(session),
-                state.settings.sessionProfilePictures[sessionId]
-                    ?? state.localSettings.sessionProfilePictures[sessionId]
+                state.settings?.sessionProfilePictures?.[sessionId]
+                    ?? state.localSettings?.sessionProfilePictures?.[sessionId]
                     ?? '',
                 sessionMessages,
                 session.thinking,
@@ -2991,6 +3476,7 @@ class Sync {
     })[]) => {
         const active = storage.getState().getActiveSessions();
         storage.getState().applySessions(sessions);
+        for (const session of sessions) this.sessionAvatars.refresh(session.id);
         const newActive = storage.getState().getActiveSessions();
         this.applySessionDiff(active, newActive);
     }

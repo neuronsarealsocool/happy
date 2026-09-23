@@ -1,9 +1,10 @@
 import React from 'react';
 import { Platform, View, FlatList } from 'react-native';
 import { Text } from '@/components/StyledText';
-import { useAllSessions } from '@/sync/storage';
+import { useAllSessions, useProjects } from '@/sync/storage';
 import { Session } from '@/sync/storageTypes';
 import { SessionProfilePictureAvatar } from '@/components/SessionProfilePictureAvatar';
+import { resolveSessionAvatar } from '@/sync/resolveSessionAvatar';
 import { getSessionName, getSessionSubtitle, getSessionAvatarId } from '@/utils/sessionUtils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StyleSheet } from 'react-native-unistyles';
@@ -189,6 +190,7 @@ function groupSessionsByDate(sessions: Session[]): SessionHistoryItem[] {
 export default function SessionHistory() {
     const safeArea = useSafeAreaInsets();
     const allSessions = useAllSessions();
+    const projects = useProjects();
     const navigateToSession = useNavigateToSession();
     
     const groupedItems = React.useMemo(() => {
@@ -211,6 +213,7 @@ export default function SessionHistory() {
             const sessionName = getSessionName(session);
             const sessionSubtitle = getSessionSubtitle(session);
             const avatarId = getSessionAvatarId(session);
+            const avatar = resolveSessionAvatar(session, projects);
             
             // Determine card styling based on position within date group
             const prevItem = index > 0 ? groupedItems[index - 1] : null;
@@ -245,6 +248,9 @@ export default function SessionHistory() {
                         avatarId={avatarId}
                         size={48}
                         editable
+                        bot={!!session.metadata?.bot}
+                        fallbackImageUrl={avatar?.uri}
+                        fallbackThumbhash={avatar?.thumbhash}
                     />
                     <View style={styles.sessionContent}>
                         <Text style={styles.sessionTitle} numberOfLines={1}>
@@ -274,7 +280,7 @@ export default function SessionHistory() {
         }
         
         return null;
-    }, [groupedItems, navigateToSession]);
+    }, [groupedItems, navigateToSession, projects]);
     
     const keyExtractor = React.useCallback((item: SessionHistoryItem, index: number) => {
         if (item.type === 'date-header') {

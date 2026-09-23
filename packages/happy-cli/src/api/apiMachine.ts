@@ -4,6 +4,7 @@
  */
 
 import { io, Socket } from 'socket.io-client';
+import { z } from 'zod';
 import { logger } from '@/ui/logger';
 import { configuration } from '@/configuration';
 import { MachineMetadata, DaemonState, Machine, Update, UpdateMachineBody } from './types';
@@ -13,8 +14,11 @@ import { backoff } from '@/utils/time';
 import { RpcHandlerManager } from './rpc/RpcHandlerManager';
 import { detectCLIAvailability, CLIAvailability } from '@/utils/detectCLI';
 import { detectResumeSupport, type ResumeSupport } from '@/resume/localHappyAgentAuth';
-import { shouldReconnect } from '@/utils/lidState';
-import type { ResumeSessionOptions } from '@/daemon/types';
+import {
+    releaseReconnectCapabilityMonitor,
+    retainReconnectCapabilityMonitor,
+    shouldReconnect,
+} from '@/utils/lidState';
 import { getProjectPath } from '@/claude/utils/path';
 import {
     forkSession as claudeForkSession,
@@ -89,6 +93,33 @@ interface DaemonToServerEvents {
     }) => void) => void;
 }
 
+/**
+ * Session state supplied by the client so the daemon can resume a session it
+ * never tracked (started before this daemon, or on a daemon that has since
+ * restarted). The daemon cannot reconstruct this on its own: reattaching needs
+ * the per-session data key, and the daemon only holds the account public key.
+ * The payload arrives over the machine-encrypted RPC channel.
+ */
+export const ResumeFallbackSchema = z.object({
+    metadata: z.object({
+        path: z.string().min(1),
+        machineId: z.string().min(1),
+        flavor: z.string().nullish(),
+        claudeSessionId: z.string().optional(),
+        codexThreadId: z.string().optional(),
+    }).passthrough(),
+    metadataVersion: z.number().int().nonnegative(),
+    agentStateVersion: z.number().int().nonnegative(),
+    seq: z.number().int().nonnegative(),
+    encryptionKey: z.string().base64().length(44)
+        .refine(key => decodeBase64(key).length === 32),
+    encryptionVariant: z.literal('dataKey'),
+});
+
+export type ResumeFallback = z.infer<typeof ResumeFallbackSchema>;
+
+export type ResumeSessionOptions = { model?: string; permissionMode?: string; fallback?: ResumeFallback; fallbackReason?: string };
+
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
     resumeSession?: (sessionId: string, options?: ResumeSessionOptions) => Promise<SpawnSessionResult>;
@@ -121,6 +152,9 @@ export class ApiMachineClient {
     private rpcHandlerManager: RpcHandlerManager;
     private resumeSessionHandler: ((sessionId: string, options?: ResumeSessionOptions) => Promise<SpawnSessionResult>) | null = null;
     private reconnectInterval: NodeJS.Timeout | null = null;
+    private reconnectTimeout: NodeJS.Timeout | null = null;
+    private reconnectCapabilityHeld = false;
+    private shutdownRequested = false;
 
     constructor(
         private token: string,
@@ -338,7 +372,7 @@ export class ApiMachineClient {
         if (this.resumeSessionHandler) {
             if (!this.rpcHandlerManager.hasHandler(method)) {
                 this.rpcHandlerManager.registerHandler(method, async (params: any) => {
-                    const { sessionId, model, permissionMode, reconnect } = params || {};
+                    const { sessionId, model, permissionMode, fallback, fallbackReason } = params || {};
 
                     if (!sessionId || typeof sessionId !== 'string') {
                         throw new Error('Session ID is required');
@@ -349,7 +383,19 @@ export class ApiMachineClient {
                         throw new Error('Resume session handler not available');
                     }
 
-                    const result = await handler(sessionId, { model, permissionMode, reconnect });
+                    // Older clients send no fallback, and a malformed one is
+                    // not worth failing the call over: the tracked-session path
+                    // may still succeed.
+                    const parsedFallback = fallback ? ResumeFallbackSchema.safeParse(fallback) : null;
+                    const result = await handler(sessionId, {
+                        model,
+                        permissionMode,
+                        fallback: parsedFallback?.success && parsedFallback.data.metadata.machineId === this.machine.id
+                            ? parsedFallback.data : undefined,
+                        // Free-form, client-supplied and only ever echoed back
+                        // in an error message, so it is bounded, not trusted.
+                        fallbackReason: typeof fallbackReason === 'string' ? fallbackReason.slice(0, 64) : undefined,
+                    });
                     switch (result.type) {
                         case 'success':
                             return { type: 'success', sessionId: result.sessionId };
@@ -425,7 +471,21 @@ export class ApiMachineClient {
         });
     }
 
+    private registeredRpcMethods = new Set<string>();
+
+    isReady(): boolean {
+        return this.socket?.connected === true
+            && this.registeredRpcMethods.has(`${this.machine.id}:spawn-happy-session`)
+            && (!this.resumeSessionHandler || this.registeredRpcMethods.has(`${this.machine.id}:resume-happy-session`));
+    }
+
     connect() {
+        this.shutdownRequested = false;
+        if (!this.reconnectCapabilityHeld) {
+            retainReconnectCapabilityMonitor();
+            this.reconnectCapabilityHeld = true;
+        }
+
         const serverUrl = configuration.serverUrl.replace(/^http/, 'ws');
         logger.debug(`[API MACHINE] Connecting to ${serverUrl}`);
 
@@ -442,11 +502,16 @@ export class ApiMachineClient {
         });
 
         this.socket.on('connect', () => {
+            this.registeredRpcMethods.clear();
             logger.debug('[API MACHINE] Connected to server');
 
             if (this.reconnectInterval) {
                 clearInterval(this.reconnectInterval);
                 this.reconnectInterval = null;
+            }
+            if (this.reconnectTimeout) {
+                clearTimeout(this.reconnectTimeout);
+                this.reconnectTimeout = null;
             }
 
             this.updateDaemonState((state) => ({
@@ -463,10 +528,20 @@ export class ApiMachineClient {
         });
 
         this.socket.on('disconnect', (reason) => {
+            this.registeredRpcMethods.clear();
             logger.debug(`[API MACHINE] Disconnected from server — reason: ${reason}`);
             this.rpcHandlerManager.onSocketDisconnect();
             this.stopKeepAlive();
-            this.startSmartReconnect();
+            if (!this.shutdownRequested) {
+                this.startSmartReconnect();
+            }
+        });
+
+        this.socket.on('rpc-registered', (data: { method?: unknown } | null) => {
+            if (typeof data?.method === 'string') this.registeredRpcMethods.add(data.method);
+        });
+        this.socket.on('rpc-unregistered', (data: { method?: unknown } | null) => {
+            if (typeof data?.method === 'string') this.registeredRpcMethods.delete(data.method);
         });
 
         // Single consolidated RPC handler
@@ -523,16 +598,33 @@ export class ApiMachineClient {
         const prev = this.lastKnownCLIAvailability;
         const newResumeSupport = detectResumeSupport();
         const prevResume = this.lastKnownResumeSupport;
-        const cliAvailabilityChanged = !prev || prev.claude !== newAvailability.claude || prev.codex !== newAvailability.codex || prev.gemini !== newAvailability.gemini || prev.openclaw !== newAvailability.openclaw;
+        // Every detected CLI has to be compared here. A key left out is never
+        // republished after startup, so installing or removing that agent goes
+        // unnoticed for the life of the daemon — and the app hides agents it is
+        // not told about.
+        const cliAvailabilityChanged = !prev
+            || prev.claude !== newAvailability.claude
+            || prev.codex !== newAvailability.codex
+            || prev.gemini !== newAvailability.gemini
+            || prev.openclaw !== newAvailability.openclaw
+            || prev.agy !== newAvailability.agy;
         const resumeSupportChanged = !prevResume
             || prevResume.rpcAvailable !== newResumeSupport.rpcAvailable
             || prevResume.happyAgentAuthenticated !== newResumeSupport.happyAgentAuthenticated;
+        // POST /v1/machines returns the stored encrypted metadata when the
+        // machine already exists. After a CLI upgrade that can leave the app
+        // looking at the version from the machine's first registration even
+        // though this daemon is newer. Repair it through the normal versioned
+        // metadata update so fields owned by the app (for example displayName)
+        // are preserved.
+        const cliVersionChanged = this.machine.metadata?.happyCliVersion !== configuration.currentCliVersion;
 
-        if (cliAvailabilityChanged || resumeSupportChanged) {
+        if (cliAvailabilityChanged || resumeSupportChanged || cliVersionChanged) {
             this.lastKnownCLIAvailability = newAvailability;
             this.lastKnownResumeSupport = newResumeSupport;
             this.updateMachineMetadata((metadata) => ({
                 ...(metadata || {} as any),
+                happyCliVersion: configuration.currentCliVersion,
                 cliAvailability: newAvailability,
                 resumeSupport: { ...newResumeSupport, rpcAvailable: !!this.resumeSessionHandler },
             })).catch((err) => {
@@ -554,7 +646,7 @@ export class ApiMachineClient {
         if (this.reconnectInterval) return;
 
         this.reconnectInterval = setInterval(() => {
-            if (this.socket.connected) {
+            if (this.shutdownRequested || this.socket.connected) {
                 clearInterval(this.reconnectInterval!);
                 this.reconnectInterval = null;
                 return;
@@ -568,8 +660,13 @@ export class ApiMachineClient {
         }, 3000);
 
         if (shouldReconnect()) {
-            logger.debug('[API MACHINE] Network up + lid open — reconnecting in 1s');
-            setTimeout(() => { if (!this.socket.connected) this.socket.connect() }, 1000);
+            logger.debug('[API MACHINE] Network available — reconnecting in 1s');
+            this.reconnectTimeout = setTimeout(() => {
+                this.reconnectTimeout = null;
+                if (!this.shutdownRequested && !this.socket.connected && shouldReconnect()) {
+                    this.socket.connect();
+                }
+            }, 1000);
         }
     }
 
@@ -583,10 +680,19 @@ export class ApiMachineClient {
 
     shutdown() {
         logger.debug('[API MACHINE] Shutting down');
+        this.shutdownRequested = true;
+        if (this.reconnectCapabilityHeld) {
+            releaseReconnectCapabilityMonitor();
+            this.reconnectCapabilityHeld = false;
+        }
         this.stopKeepAlive();
         if (this.reconnectInterval) {
             clearInterval(this.reconnectInterval);
             this.reconnectInterval = null;
+        }
+        if (this.reconnectTimeout) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = null;
         }
         if (this.socket) {
             this.socket.close();
