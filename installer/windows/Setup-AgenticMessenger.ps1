@@ -33,6 +33,7 @@ if ($RawArgs -contains "-NoPause") { $NoPause = $true }
 $IsCompiledExe = $CommandPath -and (Test-Path $CommandPath) -and ([IO.Path]::GetExtension($CommandPath) -ieq ".exe")
 $TranscriptStarted = $false
 $BundledTrayScript = $null
+$BundledTrayExeBase64 = $null
 $BundledIconBase64 = $null
 
 New-Item -ItemType Directory -Force -Path $InstallDir, $LogDir, $StartMenuDir | Out-Null
@@ -83,11 +84,29 @@ function Add-UserPathEntry {
     Refresh-Path
 }
 
-function Remove-LegacyInstallEntries {
+function Stop-AgenticMessengerTrayForUpdate {
     $legacyTrayScript = Join-Path $LegacyInstallDir "Tray-HappyCodex.ps1"
-    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($legacyTrayScript) } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    $currentTrayScript = Join-Path $InstallDir "Tray-AgenticMessenger.ps1"
+    $powershellTrayIds = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandLine -and
+            ($_.CommandLine.Contains($legacyTrayScript) -or $_.CommandLine.Contains($currentTrayScript))
+        } |
+        ForEach-Object { $_.ProcessId })
+
+    $trayProcesses = @(Get-Process -Name "AgenticMessengerTray" -ErrorAction SilentlyContinue)
+    foreach ($processId in $powershellTrayIds) {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        Wait-Process -Id $processId -Timeout 5 -ErrorAction SilentlyContinue
+    }
+    foreach ($process in $trayProcesses) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
+    }
+}
+
+function Remove-LegacyInstallEntries {
+    Stop-AgenticMessengerTrayForUpdate
 
     $legacyPaths = @(
         (Join-Path $DesktopDir "Happy Codex.lnk"),
@@ -335,6 +354,7 @@ function Install-OrUpdateCliTools {
 
 function Write-InstalledScripts {
     Write-Step "Writing launcher scripts"
+    Stop-AgenticMessengerTrayForUpdate
 
     $startScript = @'
 @echo off
@@ -403,6 +423,10 @@ exit /b 0
         else {
             Write-Host "Warning: Tray-AgenticMessenger.ps1 was not found; tray shortcuts will be created after the next update."
         }
+    }
+
+    if ($BundledTrayExeBase64) {
+        [IO.File]::WriteAllBytes((Join-Path $InstallDir "AgenticMessengerTray.exe"), [Convert]::FromBase64String($BundledTrayExeBase64))
     }
 
     if ($BundledIconBase64) {
@@ -484,21 +508,21 @@ function Install-Shortcuts {
     Write-Step "Creating shortcuts"
 
     $cmd = Join-Path $env:WINDIR "System32\cmd.exe"
-    $powershell = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $trayExe = Join-Path $InstallDir "AgenticMessengerTray.exe"
     $startArgs = "/k `"$InstallDir\Start-AgenticMessenger.cmd`""
     $updateArgs = "/k `"$InstallDir\Update-AgenticMessenger.cmd`""
-    $trayArgs = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstallDir\Tray-AgenticMessenger.ps1`" -StartDaemon"
-    $trayCommand = "$powershell $trayArgs"
+    $trayArgs = "-StartDaemon"
+    $trayCommand = "`"$trayExe`" $trayArgs"
 
     Remove-LegacyInstallEntries
 
     New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger.lnk") -TargetPath $cmd -Arguments $startArgs
-    New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
+    New-Shortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Tray.lnk") -TargetPath $trayExe -Arguments $trayArgs
     New-Shortcut -Path (Join-Path $StartMenuDir "Update and Login Agentic Messenger.lnk") -TargetPath $cmd -Arguments $updateArgs
     New-WebShortcut -Path (Join-Path $StartMenuDir "Agentic Messenger Web.url")
 
     New-Shortcut -Path (Join-Path $DesktopDir "Agentic Messenger.lnk") -TargetPath $cmd -Arguments $startArgs
-    New-Shortcut -Path (Join-Path $DesktopDir "Agentic Messenger Tray.lnk") -TargetPath $powershell -Arguments $trayArgs
+    New-Shortcut -Path (Join-Path $DesktopDir "Agentic Messenger Tray.lnk") -TargetPath $trayExe -Arguments $trayArgs
     New-WebShortcut -Path (Join-Path $DesktopDir "Agentic Messenger Web.url")
 
     if (-not $NoStartup) {
@@ -531,6 +555,13 @@ function Start-AgenticMessengerDaemon {
     Write-Host "Happy daemon is running."
 }
 
+function Start-AgenticMessengerTray {
+    $trayExe = Join-Path $InstallDir "AgenticMessengerTray.exe"
+    if (Test-Path $trayExe) {
+        Start-Process -FilePath $trayExe -ArgumentList @("-StartDaemon") -WorkingDirectory $InstallDir | Out-Null
+    }
+}
+
 function Start-LoginFlow {
     if ($SkipLogin) {
         return
@@ -557,12 +588,14 @@ try {
     Write-Host "Agentic Messenger web: $AgenticMessengerWebUrl"
     Write-Host "Install dir: $InstallDir"
 
+    Stop-AgenticMessengerTrayForUpdate
     Install-NodeIfNeeded
     Install-OrUpdateCliTools
     Configure-HappyEnvironment
     Write-InstalledScripts
     Install-Shortcuts
     Start-AgenticMessengerDaemon
+    Start-AgenticMessengerTray
     Start-LoginFlow
 
     Write-Step "Done"

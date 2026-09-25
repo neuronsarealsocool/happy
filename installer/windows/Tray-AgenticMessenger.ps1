@@ -85,13 +85,23 @@ function Start-HiddenCommand {
 }
 
 function Test-HappyDaemonRunning {
-    $happy = Find-CommandPath @("happy.cmd", "happy")
-    if (-not $happy) {
+    $statePath = Join-Path $env:USERPROFILE ".happy\daemon.state.json"
+    if (-not (Test-Path $statePath)) {
         return $false
     }
 
-    $output = & $happy doctor 2>$null
-    return (($output -join "`n") -match "Daemon is running")
+    try {
+        $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+        if (-not $state.pid) {
+            return $false
+        }
+
+        $process = Get-Process -Id ([int]$state.pid) -ErrorAction Stop
+        return ($process.ProcessName -ieq "node")
+    }
+    catch {
+        return $false
+    }
 }
 
 function Wait-HappyDaemonRunning {
@@ -211,6 +221,7 @@ function Test-AgenticMessengerTray {
     $codex = Find-CommandPath @("codex.cmd", "codex")
     $updater = Join-Path $InstallDir "Update-AgenticMessenger.cmd"
     $trayScript = Join-Path $InstallDir "Tray-AgenticMessenger.ps1"
+    $trayExe = Join-Path $InstallDir "AgenticMessengerTray.exe"
     $startupTray = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Tray.lnk"
     $desktopTray = Join-Path ([Environment]::GetFolderPath("DesktopDirectory")) "Agentic Messenger Tray.lnk"
     $startupDaemon = Join-Path ([Environment]::GetFolderPath("Startup")) "Agentic Messenger Daemon.lnk"
@@ -228,9 +239,10 @@ function Test-AgenticMessengerTray {
         [pscustomobject]@{ Name = "Daemon launcher"; Ok = (Test-Path $DaemonLauncher); Detail = $DaemonLauncher },
         [pscustomobject]@{ Name = "Updater launcher"; Ok = (Test-Path $updater); Detail = $updater },
         [pscustomobject]@{ Name = "Tray script"; Ok = (Test-Path $trayScript); Detail = $trayScript },
+        [pscustomobject]@{ Name = "Windowless tray executable"; Ok = (Test-Path $trayExe); Detail = $trayExe },
         [pscustomobject]@{ Name = "Desktop tray shortcut"; Ok = (Test-Path $desktopTray); Detail = $desktopTray },
         [pscustomobject]@{ Name = "Startup folder tray shortcut removed"; Ok = (-not (Test-Path $startupTray)); Detail = $startupTray },
-        [pscustomobject]@{ Name = "Tray Run key startup"; Ok = ($runValue -and $runValue -match "powershell.exe" -and $runValue -match "WindowStyle Hidden" -and $runValue -match "Tray-AgenticMessenger\.ps1"); Detail = $runValue },
+        [pscustomobject]@{ Name = "Tray Run key startup"; Ok = ($runValue -and $runValue -match 'AgenticMessengerTray\.exe' -and $runValue -match '-StartDaemon' -and $runValue -notmatch 'powershell|cmd\.exe'); Detail = $runValue },
         [pscustomobject]@{ Name = "Daemon startup shortcut removed"; Ok = (-not (Test-Path $startupDaemon)); Detail = $startupDaemon },
         [pscustomobject]@{ Name = "Legacy Happy Codex tray startup removed"; Ok = (-not (Test-Path $legacyStartupTray)); Detail = $legacyStartupTray },
         [pscustomobject]@{ Name = "Legacy Happy Codex daemon startup removed"; Ok = (-not (Test-Path $legacyStartupDaemon)); Detail = $legacyStartupDaemon },
