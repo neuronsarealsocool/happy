@@ -105,8 +105,28 @@ function Stop-AgenticMessengerTrayForUpdate {
     }
 }
 
+function Remove-LegacyShellLaunchCache {
+    $shellCachePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\UFH\SHC"
+    if (-not (Test-Path $shellCachePath)) {
+        return
+    }
+
+    $shellCache = Get-ItemProperty -Path $shellCachePath
+    foreach ($property in $shellCache.PSObject.Properties) {
+        if ($property.Name -match '^PS') {
+            continue
+        }
+
+        $cachedCommand = $property.Value -join "`0"
+        if ($cachedCommand -match 'HappyCodex|Happy Codex|Tray-AgenticMessenger\.ps1|Start-AgenticMessengerTray\.vbs') {
+            Remove-ItemProperty -Path $shellCachePath -Name $property.Name -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Remove-LegacyInstallEntries {
     Stop-AgenticMessengerTrayForUpdate
+    Remove-LegacyShellLaunchCache
 
     $legacyPaths = @(
         (Join-Path $DesktopDir "Happy Codex.lnk"),
